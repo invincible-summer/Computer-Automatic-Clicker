@@ -1,0 +1,19 @@
+# 默认按 auto 处理换行符：仓库内统一 LF，检出到 Windows 时按需转换
+* text=auto
+
+# 明确的文本文件
+*.cs        text
+*.csproj    text
+*.sln       text
+*.json      text
+*.md        text
+*.gitignore text
+*.gitattributes text
+
+# 明确的二进制文件
+*.exe  binary
+*.dll  binary
+*.pdb  binary
+*.png  binary
+*.jpg  binary
+*.ico  binary

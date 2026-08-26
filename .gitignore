@@ -1,0 +1,32 @@
+# ===== 构建输出 =====
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+publish/
+artifacts/
+
+# ===== IDE / 编辑器 =====
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# ===== 运行时生成的用户数据（宏与界面设置） =====
+# 程序会把宏和 config.json 保存到 exe 旁边的 macros/ 目录，属于本机数据，不入库
+macros/
+
+# ===== 测试与日志 =====
+TestResults/
+[Ll]ogs/
+*.log
+*.tmp
+
+# ===== 系统文件 =====
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
