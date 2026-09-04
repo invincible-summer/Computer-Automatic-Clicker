@@ -108,7 +108,7 @@ class ClickService : AccessibilityService() {
             lineTo(x2.toFloat(), y2.toFloat())
         }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(50, 60_000)))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(50, 60_000).toLong()))
             .build()
         return send(gesture)
     }
