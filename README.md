@@ -61,6 +61,20 @@ gradle assembleRelease   # Release APK
 - **JSON 保存/加载**：宏文件为可读 JSON，可手工修改，与手机版互通
 - **全局热键**：无需聚焦程序窗口即可控制
 - **深色 / 浅色主题**：工具栏一键切换（☀/🌙），自动记忆
+- **MuMu 模拟器内联**：ADB 直连模拟器执行点击，**不占用本机鼠标**（详见下文）
+
+### MuMu 模拟器模式（不抢鼠标挂机）
+
+右侧「模拟器 (MuMu · ADB)」卡片可将宏的执行目标切换为 MuMu 模拟器：
+
+- **自动定位**：按 运行中的 MuMu 进程 → 默认安装目录 → 注册表卸载信息 的顺序查找官方接口 `MuMuManager.exe`（MuMu 12 V4.0.0+，位于安装目录 `shell\`），并优先使用其自带 `adb.exe`，避免系统 adb 版本冲突
+- **实例识别**：通过 `MuMuManager info -v all` 拿到每个实例的 ADB 端口（MuMu 12 默认 16384，多开按 +32 递增；旧版 MuMu 6 为 7555）与主/渲染窗口句柄
+- **自适应边框**：绑定**渲染子窗口**客户区，窗口移动、缩放、换边框比例都不影响坐标——屏幕坐标按当前渲染区实时换算为设备像素
+- **不抢鼠标**：模拟器模式下，点击/滚动/按键经 ADB 注入（`input tap` / `input swipe` / `input keyevent`），本机鼠标完全空闲，可以同时做别的事；鼠标甩到屏幕左上角急停依然有效
+- **截图取点**：一键截取模拟器画面，直接在截图上点选生成「device 坐标」点击事件（宏内标注 `emu`，存入 JSON 字段 `coordSpace: "device"`，不受窗口位置影响）
+- **按键/滚轮**：常用按键映射为 Android keycode；滚轮以事件位置的小幅滑动近似（adb 无滚轮接口）；Ctrl/Shift/Alt 组合暂不支持（自动忽略并提示）
+
+约束：单次 `adb input` 约有 200-500ms 系统延迟，模拟器模式建议事件间隔 ≥ 0.5s；首次连接若失败，先在模拟器设置里确认「ADB 调试」已开启，或重启模拟器后再连。
 
 ### 全局热键
 
@@ -120,7 +134,12 @@ src/
 │   ├── EventEditForm.cs     # 事件编辑对话框
 │   ├── UiTheme.cs           # 主题系统：深/浅色板 + 自绘圆角按钮/卡片/输入框/列表
 │   ├── Recorder.cs          # 录制器：原始输入 → 语义化事件（点击/组合键/拖拽）
-│   ├── Player.cs            # 回放引擎：循环 / 倍速 / 暂停 / 急停
+│   ├── Player.cs            # 回放引擎：循环 / 倍速 / 暂停 / 急停 / 模拟器执行后端
+│   ├── Emulator/            # MuMu 模拟器内联模块
+│   │   ├── AdbClient.cs     # adb.exe 封装：连接 / input tap / swipe / keyevent / screencap
+│   │   ├── MuMuLocator.cs   # 定位 MuMuManager.exe，解析实例（ADB 端口 + 窗口句柄）
+│   │   ├── EmulatorSession.cs # 会话：渲染窗口跟踪（自适应边框）、屏幕↔设备坐标映射、注入
+│   │   └── EmuShotDialog.cs # 截图取点：点画面生成 device 坐标事件
 │   ├── GlobalHook.cs        # 全局键盘/鼠标低级钩子（WH_*_LL）
 │   ├── Simulator.cs         # SendInput 输入模拟
 │   ├── KeyMap.cs            # 虚拟键码 <-> 可读名称

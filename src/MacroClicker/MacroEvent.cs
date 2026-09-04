@@ -24,6 +24,8 @@ internal sealed class MacroEvent
     public List<uint> Combo { get; set; } = new();        // 组合键（按下顺序）
     public List<uint> Modifiers { get; set; } = new();    // 鼠标动作附加的修饰键
     public double Delay { get; set; }
+    /// <summary>null/"screen" = 屏幕像素；"device" = 模拟器设备像素（截图取点产生，由模拟器会话注入）。</summary>
+    public string? CoordSpace { get; set; }
 
     public MacroEvent Clone() => new()
     {
@@ -35,7 +37,8 @@ internal sealed class MacroEvent
         Vk = Vk,
         Delay = Delay,
         Combo = new List<uint>(Combo),
-        Modifiers = new List<uint>(Modifiers)
+        Modifiers = new List<uint>(Modifiers),
+        CoordSpace = CoordSpace
     };
 
     public string Display
@@ -65,7 +68,8 @@ internal sealed class MacroEvent
 
     public string Params => Type switch
     {
-        EventType.MouseClick or EventType.MouseDown or EventType.MouseUp or EventType.MouseMove => $"{X}, {Y}",
+        EventType.MouseClick or EventType.MouseDown or EventType.MouseUp or EventType.MouseMove =>
+            (CoordSpace == "device" ? "emu " : "") + $"{X}, {Y}",
         EventType.Wheel => $"{Delta}",
         EventType.Key => KeyMap.NameOf(Vk),
         EventType.Hotkey => string.Join("+", Combo.Select(KeyMap.NameOf)),

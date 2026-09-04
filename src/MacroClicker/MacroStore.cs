@@ -26,6 +26,7 @@ internal static class MacroStore
         public string? Key { get; set; }
         public List<string>? Keys { get; set; }
         public List<string>? Modifiers { get; set; }
+        public string? CoordSpace { get; set; }
     }
 
     public sealed class AppSettings
@@ -43,6 +44,16 @@ internal static class MacroStore
         public bool RecMoves { get; set; } = false;
         public string? LastName { get; set; }
         public string Theme { get; set; } = "dark";
+
+        // 模拟器（MuMu / ADB）
+        public bool EmuExec { get; set; } = false;
+        public int EmuIndex { get; set; } = 0;
+        public string? EmuManagerPath { get; set; }
+
+        // 窗口尺寸（自适应屏幕：记住上次大小与最大化状态）
+        public int WinW { get; set; } = 0;
+        public int WinH { get; set; } = 0;
+        public bool WinMax { get; set; } = false;
     }
 
     internal static readonly JsonSerializerOptions JsonOpts = new()
@@ -108,7 +119,8 @@ internal static class MacroStore
         Delta = e.Type == EventType.Wheel ? e.Delta : null,
         Key = e.Type == EventType.Key ? KeyMap.NameOf(e.Vk) : null,
         Keys = e.Type == EventType.Hotkey ? e.Combo.Select(KeyMap.NameOf).ToList() : null,
-        Modifiers = e.Modifiers.Count > 0 ? e.Modifiers.Select(KeyMap.NameOf).ToList() : null
+        Modifiers = e.Modifiers.Count > 0 ? e.Modifiers.Select(KeyMap.NameOf).ToList() : null,
+        CoordSpace = e.CoordSpace == "device" ? "device" : null
     };
 
     private static MacroEvent FromDto(EventDto d)
@@ -131,7 +143,8 @@ internal static class MacroStore
             Button = d.Button ?? "left",
             X = d.X ?? 0,
             Y = d.Y ?? 0,
-            Delta = d.Delta ?? 120
+            Delta = d.Delta ?? 120,
+            CoordSpace = d.CoordSpace == "device" ? "device" : null
         };
         if (!string.IsNullOrEmpty(d.Key) && KeyMap.TryParse(d.Key, out var vk)) e.Vk = vk;
         if (d.Keys != null)

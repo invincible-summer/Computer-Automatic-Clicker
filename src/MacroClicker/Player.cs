@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using MacroClicker.Emulator;
 
 namespace MacroClicker;
 
@@ -12,6 +13,8 @@ internal sealed class PlaySettings
     public double Speed = 1.0;      // 播放速度倍率，delay/speed
     public int CountdownSeconds;    // 播放前倒计时
     public bool FailSafe = true;    // 鼠标移到屏幕左上角紧急停止
+    /// <summary>模拟器模式：鼠标/按键事件经 ADB 注入模拟器，不占用本机鼠标。</summary>
+    public bool UseEmulator;
 }
 
 /// <summary>回放引擎：后台线程按 delta time 回放事件序列，支持循环、倍速、暂停与急停。</summary>
@@ -22,6 +25,8 @@ internal sealed class Player
     private readonly ManualResetEventSlim _run = new(true);
     private Thread? _thread;
     private DateTime _lastStatusUtc = DateTime.MinValue;
+    private EmulatorSession? _emu;
+    private readonly HashSet<string> _warned = new();
 
     public bool IsBusy { get; private set; }
     public bool IsPaused { get; private set; }
@@ -35,7 +40,7 @@ internal sealed class Player
     /// <summary>回放结束：true = 正常完成，false = 被停止/急停。</summary>
     public event Action<bool>? Finished;
 
-    public void Start(List<MacroEvent> events, PlaySettings settings)
+    public void Start(List<MacroEvent> events, PlaySettings settings, EmulatorSession? emu = null)
     {
         if (IsBusy) return;
         _stop = false;
@@ -43,6 +48,10 @@ internal sealed class Player
         IsPaused = false;
         _run.Set();
         _lastStatusUtc = DateTime.MinValue;
+        _emu = settings.UseEmulator && emu != null && emu.IsReady ? emu : null;
+        _warned.Clear();
+        if (settings.UseEmulator && _emu == null)
+            Status?.Invoke("⚠ 模拟器未连接，回退为本机鼠标执行");
         _thread = new Thread(() => Run(events, settings)) { IsBackground = true, Name = "MacroPlayer" };
         _thread.Start();
     }
@@ -77,7 +86,8 @@ internal sealed class Player
                     if (d > 0 && !SleepInterruptible(d, s)) { Finish(false); return; }
 
                     StatusThrottled($"▶ 执行中 · 第 {loop} 轮 · 事件 {i + 1}/{events.Count}");
-                    Execute(events[i]);
+                    if (_emu != null) ExecuteEmu(events[i]);
+                    else Execute(events[i]);
                 }
 
                 if (s.Mode == LoopMode.Once) break;
@@ -140,6 +150,61 @@ internal sealed class Player
             waited += slice.Elapsed.TotalSeconds;
         }
         return true;
+    }
+
+    private void WarnOnce(string key, string msg)
+    {
+        if (_warned.Add(key)) Status?.Invoke("⚠ " + msg);
+    }
+
+    /// <summary>模拟器执行路径：坐标动态换算为设备像素后经 ADB 注入（不移动本机鼠标）。</summary>
+    private void ExecuteEmu(MacroEvent e)
+    {
+        var emu = _emu!;
+        switch (e.Type)
+        {
+            case EventType.MouseClick or EventType.MouseDown or EventType.MouseUp:
+                if (e.Modifiers.Count > 0)
+                    WarnOnce("mods", "模拟器模式不支持 Ctrl/Shift/Alt 修饰键，已忽略");
+                var p = emu.Resolve(e);
+                emu.Tap(p.X, p.Y);
+                break;
+
+            case EventType.MouseMove:
+                break; // ADB 无独立移动语义，跳过
+
+            case EventType.Wheel:
+                var w = emu.Resolve(e);
+                emu.Wheel(w.X, w.Y, e.Delta);
+                break;
+
+            case EventType.Key:
+            {
+                var code = AndroidKeys.FromName(KeyMap.NameOf(e.Vk));
+                if (code > 0) emu.Key(code);
+                else WarnOnce("key" + e.Vk, $"模拟器模式暂不支持按键 {KeyMap.NameOf(e.Vk)}，已跳过");
+                break;
+            }
+
+            case EventType.Hotkey:
+            {
+                var keys = e.Combo.Where(k => !KeyMap.IsModifier(k)).ToList();
+                if (keys.Count == 1)
+                {
+                    var code = AndroidKeys.FromName(KeyMap.NameOf(keys[0]));
+                    if (code > 0) emu.Key(code);
+                    else WarnOnce("combo" + keys[0], $"模拟器模式暂不支持按键 {KeyMap.NameOf(keys[0])}，已跳过");
+                }
+                else
+                {
+                    WarnOnce("combo", "模拟器模式暂不支持多键组合，已跳过");
+                }
+                break;
+            }
+
+            case EventType.Wait:
+                break;
+        }
     }
 
     private static void Execute(MacroEvent e)

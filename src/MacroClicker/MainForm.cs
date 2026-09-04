@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using MacroClicker.Emulator;
 
 namespace MacroClicker;
 
@@ -14,6 +15,10 @@ internal sealed class MainForm : Form
     private readonly AppListView _lv;
     private readonly AppButton _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay;
     private readonly AppButton _btnSave, _btnLoad, _btnClear, _btnTheme;
+    private readonly AppButton _btnEmuConnect, _btnEmuDisconnect, _btnEmuShot;
+    private readonly ComboBox _cmbEmuInst;
+    private readonly CheckBox _ckEmu;
+    private readonly Label _lblEmuStatus;
     private readonly TextBox _txtName;
     private readonly ComboBox _cmbMode, _cmbSpeed;
     private readonly NumericUpDown _numCount, _numInterval, _numCountdown;
@@ -23,6 +28,12 @@ internal sealed class MainForm : Form
     private ContextMenuStrip? _menu;
     private readonly ToolStripStatusLabel _lblStatus, _lblCount, _lblHotkeys;
     private StatusKind _statusKind = StatusKind.Info;
+
+    // ---- 模拟器（MuMu / ADB）----
+    private EmulatorSession? _emu;
+    private AdbClient? _adb;
+    private List<MuMuInstance> _emuInstances = new();
+    private string? _emuManagerPath;
 
     private AppState _state = AppState.Idle;
     private bool _failSafeTriggered;
@@ -102,8 +113,62 @@ internal sealed class MainForm : Form
             if (e.KeyCode == Keys.Delete) { DeleteSelected(); e.Handled = true; }
         };
 
-        // ---------- 右侧设置面板 ----------
-        var right = new Panel { Dock = DockStyle.Right, Width = 322, Padding = new Padding(10, 12, 12, 10) };
+        // ---------- 右侧设置面板（AutoScroll：小屏/矮窗口时自动滚动，内容不裁切） ----------
+        var right = new Panel
+        {
+            Dock = DockStyle.Right,
+            Width = 322,
+            Padding = new Padding(10, 12, 12, 10),
+            AutoScroll = true
+        };
+
+        // ---------- 模拟器卡片（MuMu / ADB）----------
+        var gEmu = new AppCard("模拟器 (MuMu · ADB)") { Dock = DockStyle.Top, Height = 180 };
+        _lblEmuStatus = new Label
+        {
+            Text = "未连接 · 启动模拟器后点「连接」",
+            Tag = "sub",
+            AutoSize = false,
+            Location = new Point(16, gEmu.ContentTop + 2),
+            Size = new Size(272, 30)
+        };
+        gEmu.Controls.Add(_lblEmuStatus);
+
+        _cmbEmuInst = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(16, gEmu.ContentTop + 36),
+            Width = 140
+        };
+        gEmu.Controls.Add(_cmbEmuInst);
+
+        AppButton EmuBtn(string text, AppVariant v, int x, int y)
+        {
+            var b = new AppButton { Text = text, Variant = v, Location = new Point(x, y), AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
+            gEmu.Controls.Add(b);
+            return b;
+        }
+        _btnEmuConnect = EmuBtn("连接", AppVariant.Primary, 164, gEmu.ContentTop + 34);
+        _btnEmuDisconnect = EmuBtn("断开", AppVariant.Ghost, 232, gEmu.ContentTop + 34);
+        _btnEmuShot = EmuBtn("截图取点", AppVariant.Neutral, 16, gEmu.ContentTop + 72);
+        _ckEmu = new CheckBox
+        {
+            Text = "模拟器模式执行（不占鼠标）",
+            AutoSize = true,
+            Location = new Point(16, gEmu.ContentTop + 110)
+        };
+        tt.SetToolTip(_ckEmu, "开启后鼠标事件通过 ADB 注入模拟器（input tap），不移动本机鼠标；F10 仍可急停");
+        gEmu.Controls.Add(_ckEmu);
+
+        _btnEmuConnect.Click += (s, e) => ConnectEmulator();
+        _btnEmuDisconnect.Click += (s, e) => DisconnectEmulator();
+        _btnEmuShot.Click += (s, e) => PickFromScreenshot();
+        _cmbEmuInst.SelectedIndexChanged += (s, e) =>
+        {
+            if (_emu != null && _cmbEmuInst.SelectedIndex >= 0
+                && _emuInstances[_cmbEmuInst.SelectedIndex].Index != _emu.Instance.Index)
+                DisconnectEmulator(silent: true);
+        };
 
         _gRec = new AppCard("录制选项") { Dock = DockStyle.Top, Height = 196 };
         int ry = _gRec.ContentTop + 4;
@@ -120,7 +185,7 @@ internal sealed class MainForm : Form
         _ckDrags = AddCk("记录拖拽（按住并移动）", true);
         _ckMoves = AddCk("记录空闲鼠标移动（事件量大）", false);
 
-        _gPlay = new AppCard("执行设置") { Dock = DockStyle.Fill, Padding = new Padding(10, 6, 10, 6) };
+        _gPlay = new AppCard("执行设置") { Dock = DockStyle.Top, Height = 336, Padding = new Padding(10, 6, 10, 6) };
         int py = _gPlay.ContentTop + 4;
         Control Row(string label, Control c, int width)
         {
@@ -178,8 +243,10 @@ internal sealed class MainForm : Form
         };
         _gPlay.Controls.Add(hint);
 
+        // 先加入的 Dock.Fill/靠下，后加入的依次靠上：gEmu 最上，gRec 居中，gPlay 靠下
         right.Controls.Add(_gPlay);
         right.Controls.Add(_gRec);
+        right.Controls.Add(gEmu);
 
         // ---------- 状态栏 ----------
         var status = new StatusStrip();
@@ -307,6 +374,7 @@ internal sealed class MainForm : Form
         _gPlay.Enabled = idle;
         _numCount.Enabled = idle && _cmbMode.SelectedIndex == 1;
         _txtName.Enabled = idle;
+        UpdateEmuButtons();
         if (idle)
         {
             _lblCount.Text = $"事件 {MacroEvents.Count}";
@@ -375,13 +443,14 @@ internal sealed class MainForm : Form
             LoopInterval = (double)_numInterval.Value,
             Speed = speed,
             CountdownSeconds = (int)_numCountdown.Value,
-            FailSafe = _ckFailsafe.Checked
+            FailSafe = _ckFailsafe.Checked,
+            UseEmulator = _ckEmu.Checked
         };
         _failSafeTriggered = false;
         var snapshot = new List<MacroEvent>(MacroEvents);
         SetState(AppState.Playing);
-        SetStatus("▶ 开始执行…", StatusKind.Good);
-        _player.Start(snapshot, settings);
+        SetStatus(_ckEmu.Checked && _emu != null ? "▶ 开始执行（模拟器模式）…" : "▶ 开始执行…", StatusKind.Good);
+        _player.Start(snapshot, settings, _emu);
     }
 
     private void TogglePause()
@@ -539,6 +608,115 @@ internal sealed class MainForm : Form
         return m;
     }
 
+    // ================= 模拟器（MuMu / ADB） =================
+
+    private void SetEmuStatus(string text, bool good)
+    {
+        _lblEmuStatus.Text = text;
+        _lblEmuStatus.ForeColor = good ? UiTheme.C.Success : UiTheme.C.SubText;
+    }
+
+    /// <summary>搜索 MuMuManager → 解析实例 → 连接选中（或首个运行中的）实例。</summary>
+    private void ConnectEmulator()
+    {
+        SetEmuStatus("正在定位 MuMu 模拟器…", false);
+        _emuManagerPath = MuMuLocator.FindManagerPath();
+        if (_emuManagerPath == null)
+        {
+            SetEmuStatus("未找到 MuMuManager.exe：请确认已安装 MuMu 模拟器 12（V4.0.0+）", false);
+            return;
+        }
+
+        var adbPath = MuMuLocator.FindAdbNearManager(_emuManagerPath);
+        if (adbPath == null)
+        {
+            SetEmuStatus("未在 MuMu 目录找到 adb.exe：" + Path.GetDirectoryName(_emuManagerPath), false);
+            return;
+        }
+        _adb = new AdbClient(adbPath);
+
+        var (instances, err) = MuMuLocator.QueryInstances(_emuManagerPath);
+        if (instances.Count == 0)
+        {
+            SetEmuStatus(err, false);
+            return;
+        }
+        _emuInstances = instances;
+        _cmbEmuInst.Items.Clear();
+        foreach (var it in instances)
+            _cmbEmuInst.Items.Add($"实例 {it.Index} · {(it.Running ? $"端口 {it.Port}" : "未启动")}");
+        var prefer = _cmbEmuInst.SelectedIndex < 0
+            ? Math.Clamp(_pendingEmuIndex, 0, instances.Count - 1)
+            : _cmbEmuInst.SelectedIndex;
+        if (!instances[prefer].Running)
+            prefer = instances.FindIndex(i => i.Running);
+        _cmbEmuInst.SelectedIndex = prefer >= 0 ? prefer : 0;
+
+        var inst = instances[_cmbEmuInst.SelectedIndex];
+        if (!inst.Running)
+        {
+            SetEmuStatus($"实例 {inst.Index} 未启动，请先启动模拟器再连接", false);
+            return;
+        }
+
+        SetEmuStatus($"正在连接 {inst.Serial} …", false);
+        var session = new EmulatorSession(_adb, inst, () => MuMuLocator.QueryInstances(_emuManagerPath!).Instances);
+        var error = session.Connect();
+        if (error.Length > 0)
+        {
+            SetEmuStatus($"连接 {inst.Serial} 失败：{error}", false);
+            return;
+        }
+        _emu = session;
+        _pendingEmuIndex = inst.Index;
+        SetEmuStatus("已连接 " + session.Describe(), true);
+        UpdateEmuButtons();
+    }
+
+    private int _pendingEmuIndex;
+
+    private void DisconnectEmulator(bool silent = false)
+    {
+        _emu = null;
+        if (!silent) SetEmuStatus("已断开连接", false);
+        UpdateEmuButtons();
+    }
+
+    private void UpdateEmuButtons()
+    {
+        var idle = _state == AppState.Idle;
+        _btnEmuConnect.Enabled = idle && _emu == null;
+        _btnEmuDisconnect.Enabled = idle && _emu != null;
+        _btnEmuShot.Enabled = idle && _emu != null;
+        _cmbEmuInst.Enabled = idle;
+    }
+
+    /// <summary>截取模拟器画面，点选生成 device 坐标事件（不受窗口位置/缩放影响）。</summary>
+    private void PickFromScreenshot()
+    {
+        if (_emu == null || !_emu.IsReady)
+        {
+            SetEmuStatus("请先连接模拟器", false);
+            return;
+        }
+        SetEmuStatus("正在截取模拟器画面…", false);
+        var shot = _emu.Capture();
+        if (shot == null)
+        {
+            SetEmuStatus("截图失败（模拟器可能正忙，请重试）", false);
+            return;
+        }
+        SetEmuStatus("已连接 " + _emu.Describe(), true);
+        using var dlg = new EmuShotDialog(shot, _emu.Describe());
+        if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Picked.Count > 0)
+        {
+            foreach (var ev in dlg.Picked) MacroEvents.Add(ev);
+            RebuildList();
+            SetStatus($"✔ 已从截图添加 {dlg.Picked.Count} 个模拟器点击", StatusKind.Good);
+        }
+    }
+
+
     // ================= 保存 / 打开 =================
 
     private void SaveMacro()
@@ -627,7 +805,13 @@ internal sealed class MainForm : Form
                 RecDrags = _ckDrags.Checked,
                 RecMoves = _ckMoves.Checked,
                 LastName = _txtName.Text,
-                Theme = UiTheme.Dark ? "dark" : "light"
+                Theme = UiTheme.Dark ? "dark" : "light",
+                EmuExec = _ckEmu.Checked,
+                EmuIndex = _pendingEmuIndex,
+                EmuManagerPath = _emuManagerPath,
+                WinW = WindowState == FormWindowState.Normal ? Size.Width : RestoreBounds.Width,
+                WinH = WindowState == FormWindowState.Normal ? Size.Height : RestoreBounds.Height,
+                WinMax = WindowState == FormWindowState.Maximized
             };
             Directory.CreateDirectory(MacroStore.MacrosDir);
             File.WriteAllText(Path.Combine(MacroStore.MacrosDir, "config.json"),
@@ -657,6 +841,15 @@ internal sealed class MainForm : Form
             _ckDrags.Checked = dto.RecDrags;
             _ckMoves.Checked = dto.RecMoves;
             if (!string.IsNullOrEmpty(dto.LastName)) _txtName.Text = dto.LastName;
+            _ckEmu.Checked = dto.EmuExec;
+            _pendingEmuIndex = Math.Max(0, dto.EmuIndex);
+            if (!string.IsNullOrEmpty(dto.EmuManagerPath)) _emuManagerPath = dto.EmuManagerPath;
+            if (dto.WinW >= MinimumSize.Width && dto.WinH >= MinimumSize.Height)
+            {
+                Size = new Size(Math.Min(dto.WinW, Screen.PrimaryScreen!.WorkingArea.Width),
+                                Math.Min(dto.WinH, Screen.PrimaryScreen.WorkingArea.Height));
+                if (dto.WinMax) WindowState = FormWindowState.Maximized;
+            }
         }
         catch { }
     }
