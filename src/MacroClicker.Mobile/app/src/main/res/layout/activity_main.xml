@@ -321,9 +321,9 @@
                 android:layout_marginHorizontal="5dp"
                 android:layout_weight="1"
                 android:text="@string/add_swipe"
+                android:textColor="?attr/colorOnPrimaryContainer"
                 android:textSize="13sp"
-                app:backgroundTint="?attr/colorPrimaryContainer"
-                app:textColor="?attr/colorOnPrimaryContainer" />
+                app:backgroundTint="?attr/colorPrimaryContainer" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnAddWait"
@@ -332,9 +332,9 @@
                 android:layout_marginStart="5dp"
                 android:layout_weight="1"
                 android:text="@string/add_wait"
+                android:textColor="?attr/colorOnPrimaryContainer"
                 android:textSize="13sp"
-                app:backgroundTint="?attr/colorPrimaryContainer"
-                app:textColor="?attr/colorOnPrimaryContainer" />
+                app:backgroundTint="?attr/colorPrimaryContainer" />
         </LinearLayout>
 
         <!-- 开始执行 -->
