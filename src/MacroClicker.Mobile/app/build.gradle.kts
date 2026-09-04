@@ -34,6 +34,9 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (!System.getenv("MC_KEYSTORE").isNullOrBlank()) {
                 signingConfig = signingConfigs.getByName("release")
+            } else {
+                // 本地无签名环境时回退 debug 签名，保证 assembleRelease 产物可直接安装
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }

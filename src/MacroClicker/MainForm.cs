@@ -167,7 +167,10 @@ internal sealed class MainForm : Form
         {
             if (_emu != null && _cmbEmuInst.SelectedIndex >= 0
                 && _emuInstances[_cmbEmuInst.SelectedIndex].Index != _emu.Instance.Index)
+            {
                 DisconnectEmulator(silent: true);
+                SetEmuStatus("实例已切换 · 请重新连接", false);
+            }
         };
 
         _gRec = new AppCard("录制选项") { Dock = DockStyle.Top, Height = 196 };
@@ -271,14 +274,18 @@ internal sealed class MainForm : Form
             _lblCount.Text = $"事件 {MacroEvents.Count}";
         };
 
-        _player.Status += s => Ui(() => SetStatus(s, StatusKind.Good));
+        _player.Status += s => Ui(() => SetStatus(s, s.StartsWith("⚠") ? StatusKind.Warn : StatusKind.Good));
         _player.AbortedByFailSafe += () => { _failSafeTriggered = true; };
         _player.Finished += ok => Ui(() =>
         {
             var fs = _failSafeTriggered;
             _failSafeTriggered = false;
+            var reason = _player.StopReason;
+            _player.StopReason = null;
             SetState(AppState.Idle);
-            SetStatus(fs ? "⛔ 已触发紧急停止（鼠标左上角）" : ok ? "✔ 执行完成" : "■ 已停止",
+            SetStatus(fs ? "⛔ 已触发紧急停止（鼠标左上角）"
+                     : !ok && reason != null ? reason
+                     : ok ? "✔ 执行完成" : "■ 已停止",
                 fs || !ok ? StatusKind.Bad : StatusKind.Good);
         });
 
@@ -306,6 +313,7 @@ internal sealed class MainForm : Form
         if (_menu != null) UiTheme.StyleMenu(_menu);
         _toolbar.BackColor = UiTheme.C.Panel;
         _btnTheme.Text = UiTheme.Dark ? "☀ 浅色" : "🌙 深色";
+        SetEmuStatus(_lblEmuStatus.Text, _emuStatusGood);
         RefreshStatus();
     }
 
@@ -610,8 +618,11 @@ internal sealed class MainForm : Form
 
     // ================= 模拟器（MuMu / ADB） =================
 
+    private bool _emuStatusGood;
+
     private void SetEmuStatus(string text, bool good)
     {
+        _emuStatusGood = good;
         _lblEmuStatus.Text = text;
         _lblEmuStatus.ForeColor = good ? UiTheme.C.Success : UiTheme.C.SubText;
     }
@@ -694,6 +705,7 @@ internal sealed class MainForm : Form
     /// <summary>截取模拟器画面，点选生成 device 坐标事件（不受窗口位置/缩放影响）。</summary>
     private void PickFromScreenshot()
     {
+        if (_state != AppState.Idle) return;
         if (_emu == null || !_emu.IsReady)
         {
             SetEmuStatus("请先连接模拟器", false);
@@ -708,11 +720,13 @@ internal sealed class MainForm : Form
         }
         SetEmuStatus("已连接 " + _emu.Describe(), true);
         using var dlg = new EmuShotDialog(shot, _emu.Describe());
-        if (dlg.ShowDialog(this) == DialogResult.OK && dlg.Picked.Count > 0)
+        var picked = dlg.ShowDialog(this) == DialogResult.OK ? dlg.Picked.Count : 0;
+        shot.Dispose();
+        if (picked > 0)
         {
-            foreach (var ev in dlg.Picked) MacroEvents.Add(ev);
+            MacroEvents.AddRange(dlg.Picked);
             RebuildList();
-            SetStatus($"✔ 已从截图添加 {dlg.Picked.Count} 个模拟器点击", StatusKind.Good);
+            SetStatus($"✔ 已从截图添加 {picked} 个模拟器点击", StatusKind.Good);
         }
     }
 
@@ -891,6 +905,14 @@ internal sealed class MainForm : Form
             }
         }
         base.WndProc(ref m);
+    }
+
+    /// <summary>Aero 贴靠（Win+方向键）不受 MinimumSize 约束，这里把过小尺寸钳回下限，保证布局完整。</summary>
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (WindowState == FormWindowState.Normal && (Width < MinimumSize.Width || Height < MinimumSize.Height))
+            Size = new Size(Math.Max(Width, MinimumSize.Width), Math.Max(Height, MinimumSize.Height));
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

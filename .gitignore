@@ -9,6 +9,7 @@ artifacts/
 .vs/
 .idea/
 .vscode/
+.zcode/
 *.user
 *.suo
 *.userosscache

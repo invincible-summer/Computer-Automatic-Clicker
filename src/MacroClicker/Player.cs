@@ -31,6 +31,9 @@ internal sealed class Player
     public bool IsBusy { get; private set; }
     public bool IsPaused { get; private set; }
 
+    /// <summary>非急停的停止原因（如模拟器断开），由 UI 读取后展示并清空。</summary>
+    public string? StopReason { get; set; }
+
     /// <summary>状态文本（后台线程回调）。</summary>
     public event Action<string>? Status;
 
@@ -45,6 +48,7 @@ internal sealed class Player
         if (IsBusy) return;
         _stop = false;
         _failSafeReported = false;
+        StopReason = null;
         IsPaused = false;
         _run.Set();
         _lastStatusUtc = DateTime.MinValue;
@@ -161,6 +165,20 @@ internal sealed class Player
     private void ExecuteEmu(MacroEvent e)
     {
         var emu = _emu!;
+        // 窗口关闭/模拟器重启会导致坐标无法换算——此时绝不能盲点 (0,0)，先刷新句柄，仍失败则停止
+        if (!emu.IsReady)
+        {
+            emu.RefreshWindowHandle();
+            if (!emu.IsReady)
+            {
+                StopReason = "⛔ 模拟器已断开或窗口已关闭，已停止执行";
+                _stop = true;
+                _run.Set();
+                Status?.Invoke(StopReason);
+                return;
+            }
+        }
+
         switch (e.Type)
         {
             case EventType.MouseClick or EventType.MouseDown or EventType.MouseUp:

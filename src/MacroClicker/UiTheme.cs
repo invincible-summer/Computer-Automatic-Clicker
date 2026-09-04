@@ -432,6 +432,16 @@ internal sealed class AppButton : Button
     protected override void OnMouseUp(MouseEventArgs e) { base.OnMouseUp(e); _down = false; Invalidate(); }
     protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); _anim = 0; Invalidate(); }
     protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _timer?.Dispose();
+            _timer = null;
+        }
+        base.Dispose(disposing);
+    }
 }
 
 /// <summary>圆角卡片面板，替代 GroupBox。</summary>

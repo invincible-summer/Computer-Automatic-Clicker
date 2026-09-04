@@ -29,8 +29,12 @@ internal sealed class AdbClient
                 StandardOutputEncoding = Encoding.UTF8
             })!;
             var output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
-            p.WaitForExit(timeoutMs);
-            return (p.HasExited ? p.ExitCode : -1, output.Trim());
+            if (!p.WaitForExit(timeoutMs))
+            {
+                try { p.Kill(true); } catch { }
+                return (-1, "adb 调用超时");
+            }
+            return (p.ExitCode, output.Trim());
         }
         catch (Exception ex)
         {
@@ -53,8 +57,12 @@ internal sealed class AdbClient
             })!;
             using var ms = new MemoryStream();
             p.StandardOutput.BaseStream.CopyTo(ms);
-            p.WaitForExit(timeoutMs);
-            return p.HasExited && p.ExitCode == 0 && ms.Length > 8 ? ms.ToArray() : null;
+            if (!p.WaitForExit(timeoutMs))
+            {
+                try { p.Kill(true); } catch { }
+                return null;
+            }
+            return p.ExitCode == 0 && ms.Length > 8 ? ms.ToArray() : null;
         }
         catch
         {

@@ -167,7 +167,12 @@ internal static class MuMuLocator
             if (string.IsNullOrWhiteSpace(json))
                 return (new List<MuMuInstance>(), "MuMuManager 未返回数据（模拟器可能未安装或版本过旧，需要 V4.0.0+）");
 
-            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowTrailingCommas = true });
+            // 防御：跳过输出中可能存在的前导非 JSON 内容
+            var start = json.IndexOfAny(new[] { '[', '{' });
+            if (start < 0)
+                return (new List<MuMuInstance>(), "MuMuManager 输出无法解析：" + json.Trim());
+
+            using var doc = JsonDocument.Parse(json[start..], new JsonDocumentOptions { AllowTrailingCommas = true });
             var list = new List<MuMuInstance>();
             foreach (var item in EnumerateInstances(doc.RootElement))
                 list.Add(ParseInstance(item));

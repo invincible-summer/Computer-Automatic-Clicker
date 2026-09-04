@@ -202,8 +202,9 @@ class FloatingControls(private val service: ClickService) {
                 MotionEvent.ACTION_MOVE -> {
                     panelParams?.x = (startX + (e.rawX - downRawX).toInt())
                         .coerceIn(0, (screenW() - width).coerceAtLeast(0))
+                    // 面板高约 210dp：钳制拖动范围，避免面板底部被拖出屏幕
                     panelParams?.y = (startY + (e.rawY - downRawY).toInt())
-                        .coerceIn(0, (screenH() - dp(120)).coerceAtLeast(0))
+                        .coerceIn(0, (screenH() - dp(260)).coerceAtLeast(0))
                     panel?.let { wm.updateViewLayout(it, panelParams) }
                     true
                 }
