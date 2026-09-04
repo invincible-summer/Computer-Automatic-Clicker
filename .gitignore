@@ -30,3 +30,14 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+
+# ===== Android（src/MacroClicker.Mobile）=====
+.gradle/
+build/
+local.properties
+*.keystore
+!debug.keystore
+*.jks
+captures/
+.externalNativeBuild/
+.cxx/

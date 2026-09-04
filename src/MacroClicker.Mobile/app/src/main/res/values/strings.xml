@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">宏连点器</string>
+
+    <!-- 无障碍服务 -->
+    <string name="accessibility_label">宏连点器 · 手势执行服务</string>
+    <string name="accessibility_desc">开启后，宏连点器可以按您配置的坐标自动执行点击与滑动手势。本服务不会读取屏幕内容。</string>
+
+    <!-- 权限引导 -->
+    <string name="guide_title">使用前请完成以下授权</string>
+    <string name="guide_accessibility">① 开启无障碍服务（手势执行必需）</string>
+    <string name="guide_overlay">② 允许显示悬浮窗（悬浮控制必需）</string>
+    <string name="status_enabled">已开启</string>
+    <string name="status_disabled">未开启，点击前往</string>
+    <string name="status_granted">已授权</string>
+    <string name="status_denied">未授权，点击前往</string>
+
+    <!-- 主界面 -->
+    <string name="events_title">执行序列</string>
+    <string name="events_empty">序列为空\n点击下方「添加点击」到屏幕上取点，或添加滑动 / 等待</string>
+    <string name="settings_title">执行设置</string>
+    <string name="mode_label">执行模式</string>
+    <string name="mode_once">执行一次</string>
+    <string name="mode_count">执行指定次数</string>
+    <string name="mode_loop">无限循环</string>
+    <string name="loop_count_label">循环次数</string>
+    <string name="loop_interval_label">轮次间隔(秒)</string>
+    <string name="countdown_label">开始倒计时(秒)</string>
+    <string name="add_tap">添加点击</string>
+    <string name="add_swipe">添加滑动</string>
+    <string name="add_wait">添加等待</string>
+    <string name="start_play">开始执行</string>
+    <string name="stop_play">停止执行</string>
+    <string name="import_macro">导入宏</string>
+    <string name="clear_all">清空</string>
+
+    <!-- 取点 -->
+    <string name="pick_tap_hint">点击屏幕任意位置添加点击点（点标记可删除）</string>
+    <string name="pick_swipe_start">点击滑动【起点】</string>
+    <string name="pick_swipe_end">点击滑动【终点】</string>
+    <string name="pick_done">完成</string>
+    <string name="pick_cancel">取消</string>
+
+    <!-- 编辑事件 -->
+    <string name="edit_title_tap">编辑点击</string>
+    <string name="edit_title_swipe">编辑滑动</string>
+    <string name="edit_title_wait">编辑等待</string>
+    <string name="field_delay">执行前间隔(秒)</string>
+    <string name="field_x">X</string>
+    <string name="field_y">Y</string>
+    <string name="field_x1">起点X</string>
+    <string name="field_y1">起点Y</string>
+    <string name="field_x2">终点X</string>
+    <string name="field_y2">终点Y</string>
+    <string name="field_duration">滑动时长(毫秒)</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="delete">删除</string>
+
+    <!-- 悬浮面板 -->
+    <string name="panel_title">宏连点器</string>
+    <string name="panel_play">▶ 开始</string>
+    <string name="panel_stop">■ 停止</string>
+    <string name="panel_add_tap">＋点击</string>
+    <string name="panel_add_swipe">＋滑动</string>
+    <string name="panel_list">列表</string>
+    <string name="panel_collapse">收起</string>
+    <string name="panel_status_idle">待命</string>
+
+    <!-- 提示 -->
+    <string name="toast_need_accessibility">请先开启无障碍服务</string>
+    <string name="toast_need_overlay">请先允许显示悬浮窗</string>
+    <string name="toast_no_events">请先添加点击或滑动事件</string>
+    <string name="toast_config_saved">已保存</string>
+    <string name="toast_play_done">执行完成 ✔</string>
+    <string name="toast_play_stopped">已停止</string>
+    <string name="toast_import_none">未导入任何支持的事件（支持：点击 / 拖拽 / 等待）</string>
+    <string name="toast_import_ok">导入成功：%1$d 个事件</string>
+    <string name="toast_import_fail">文件解析失败</string>
+    <string name="toast_pick_done">已添加 %1$d 个点击点</string>
+    <string name="toast_swipe_added">已添加滑动手势</string>
+    <string name="confirm_clear">确定清空全部事件？</string>
+    <string name="dialog_ok">确定</string>
+</resources>

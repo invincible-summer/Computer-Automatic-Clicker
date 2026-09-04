@@ -42,6 +42,7 @@ internal static class MacroStore
         public bool RecDrags { get; set; } = true;
         public bool RecMoves { get; set; } = false;
         public string? LastName { get; set; }
+        public string Theme { get; set; } = "dark";
     }
 
     internal static readonly JsonSerializerOptions JsonOpts = new()
@@ -53,6 +54,19 @@ internal static class MacroStore
     };
 
     public static string MacrosDir => Path.Combine(AppContext.BaseDirectory, "macros");
+
+    /// <summary>启动早期读取主题偏好（深色为默认）。</summary>
+    public static bool ReadThemeDark()
+    {
+        try
+        {
+            var p = Path.Combine(MacrosDir, "config.json");
+            if (!File.Exists(p)) return true;
+            var dto = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(p), JsonOpts);
+            return dto?.Theme != "light";
+        }
+        catch { return true; }
+    }
 
     public static void Save(string path, string name, IList<MacroEvent> events)
     {

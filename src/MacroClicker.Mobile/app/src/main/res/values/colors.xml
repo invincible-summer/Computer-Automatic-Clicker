@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand_primary">#5B8CFF</color>
+    <color name="brand_primary_dark">#4877E8</color>
+    <color name="primary_container">#DCE4FF</color>
+    <color name="on_primary_container">#1B2A5E</color>
+    <color name="window_bg">#F7F8FB</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="text_main">#1B1E27</color>
+    <color name="text_sub">#6B7280</color>
+    <color name="divider">#E8EBF1</color>
+    <color name="success">#16A34A</color>
+    <color name="danger">#E5484D</color>
+    <color name="warning">#D97706</color>
+
+    <!-- 悬浮层（固定浅色卡片风格） -->
+    <color name="overlay_panel">#F2FFFFFF</color>
+    <color name="overlay_panel_stroke">#22000000</color>
+    <color name="overlay_dim">#33000000</color>
+    <color name="ball_ring">#66FFFFFF</color>
+
+    <color name="launcher_bg">#17181D</color>
+</resources>

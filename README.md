@@ -1,9 +1,55 @@
 # 宏连点器 · Macro Clicker
 
-一个 Windows 桌面自动化工具：**录制** 鼠标/键盘操作 → **编辑** 事件 → **循环回放**。
-基于 .NET 10 + WinForms，纯 Win32 API（低级全局钩子 + SendInput），无第三方依赖。
+跨平台自动化连点工具，一套设计思路、两个平台：
 
-## 功能
+- **Windows 桌面端**（`src/MacroClicker`）：**录制** 鼠标/键盘操作 → **编辑** 事件 → **循环回放**。基于 .NET 10 + WinForms，纯 Win32 API（低级全局钩子 + SendInput），零第三方依赖，深色 / 浅色主题可切换。
+- **Android 手机端**（`src/MacroClicker.Mobile`）：**屏幕取点** → **编辑序列** → **循环执行**。Kotlin 原生，通过无障碍服务（AccessibilityService）向任意应用注入点击 / 滑动手势，悬浮球随时启停，APK 可直接侧载安装。
+
+## 手机版（Android）
+
+> Android 出于安全限制无法录制其他应用的触摸操作，因此手机版采用与桌面端「配置 → 循环回放」等效的设计：
+> **点哪取哪** 生成点击序列（或添加滑动），再以桌面端相同的执行模式循环回放。
+
+### 功能
+
+- **屏幕取点**：点哪加哪，连续取多个点击点，标记可单独删除
+- **滑动手势**：依次取起点、终点，滑动时长可调
+- **等待事件**：在序列中插入停留
+- **循环执行**：执行一次 / 指定次数 / 无限循环，轮次间隔 + 开始倒计时——与桌面端一致
+- **悬浮控制球**：贴边可拖动、位置记忆；展开面板即可开始 / 停止 / 取点，无需回到 App
+- **宏互通**：可直接导入桌面端宏 JSON（点击 / 等待事件自动映射）
+- **全机型适配**：全部界面使用 dp/sp 尺寸 + 比例定位；宏内记录屏幕分辨率，跨分辨率机型导入时坐标自动按比例换算；跟随系统深色模式
+
+### 安装使用
+
+1. 下载 APK：GitHub 仓库 → **Actions** → 选择 `Android APK` 工作流运行 → 下载 `MacroClicker-Android-APK` 产物，安装到手机（需允许「安装未知应用」）
+2. 打开 App，按引导完成两项授权：
+   - **无障碍服务**（手势执行必需）：点击跳转系统设置开启「宏连点器」
+   - **悬浮窗权限**（悬浮控制必需）：点击跳转授权「显示在其他应用上层」
+3. 点「添加点击」→ App 退到后台 → 在目标界面点哪取哪 → 点「完成」
+4. 展开悬浮球面板点「▶ 开始」即可循环执行，「■ 停止」随时停止
+
+> 说明：APK 由 CI 每次构建时生成临时签名，更新安装若提示签名冲突，先卸载旧版再装。
+
+### 无障碍服务用途声明
+
+本服务的唯一职责是调用系统手势接口（`dispatchGesture`）按用户配置的坐标注入点击 / 滑动；**不读取、不记录任何屏幕内容**（`canRetrieveWindowContent=false`）。
+
+### 手机版源码构建
+
+需要 JDK 17 与 Android SDK（或 Android Studio 打开 `src/MacroClicker.Mobile` 直接构建）：
+
+```bash
+cd src/MacroClicker.Mobile
+gradle assembleDebug     # 调试 APK
+gradle assembleRelease   # Release APK
+```
+
+也可推送代码后由 GitHub Actions（`.github/workflows/android-apk.yml`）云端构建并上传 APK 产物。
+
+## Windows 桌面端
+
+### 功能
 
 - **宏录制**：捕获鼠标点击（左/右/中/侧键）、拖拽轨迹、滚轮、键盘按键与组合键（如 `Ctrl+C`）
 - **间隔记录**：每个事件记录与上一事件的间隔（delta time），回放时还原真实操作节奏
@@ -12,10 +58,11 @@
 - **播放速度**：0.25x ~ 8x
 - **播放前倒计时**
 - **紧急停止**（fail-safe）：鼠标猛甩到屏幕左上角立即停止
-- **JSON 保存/加载**：宏文件为可读 JSON，可手工修改
+- **JSON 保存/加载**：宏文件为可读 JSON，可手工修改，与手机版互通
 - **全局热键**：无需聚焦程序窗口即可控制
+- **深色 / 浅色主题**：工具栏一键切换（☀/🌙），自动记忆
 
-## 全局热键
+### 全局热键
 
 | 按键 | 功能 |
 | --- | --- |
@@ -27,7 +74,7 @@
 
 热键在录制时不会被录进宏里。循环执行卡住时，**F10** 或把鼠标移到**屏幕左上角**即可急停。
 
-## 使用方法
+### 使用方法
 
 1. 双击 `publish\MacroClicker.exe`（或在 IDE 中运行项目）
 2. 按 `F6` 开始录制，去目标窗口完成你想自动化的操作
@@ -37,7 +84,7 @@
 
 宏文件与界面设置保存在 exe 旁边的 `macros\` 目录。
 
-## 录制选项说明
+### 录制选项说明
 
 | 选项 | 默认 | 说明 |
 | --- | --- | --- |
@@ -47,7 +94,7 @@
 | 记录拖拽 | 开 | 拖拽会记录按下点和移动轨迹（事件量较大） |
 | 记录空闲鼠标移动 | 关 | 仅在需要还原精确鼠标轨迹时开启 |
 
-## 从源码构建
+### 从源码构建
 
 需要 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)（仅开发时需要，成品 exe 自包含运行时）：
 
@@ -66,18 +113,32 @@ dotnet publish src/MacroClicker -c Release -r win-x64 --self-contained true ^
 ## 项目结构
 
 ```
-src/MacroClicker/
-├── Program.cs          # 入口
-├── MainForm.cs         # 主窗口（工具栏 / 事件列表 / 设置面板 / 全局热键）
-├── EventEditForm.cs    # 事件编辑对话框
-├── Recorder.cs         # 录制器：原始输入 → 语义化事件（点击/组合键/拖拽）
-├── Player.cs           # 回放引擎：循环 / 倍速 / 暂停 / 急停
-├── GlobalHook.cs       # 全局键盘/鼠标低级钩子（WH_*_LL）
-├── Simulator.cs        # SendInput 输入模拟
-├── KeyMap.cs           # 虚拟键码 <-> 可读名称
-├── MacroEvent.cs       # 事件模型
-├── MacroStore.cs       # 宏 JSON 保存/加载、设置持久化
-└── Win32.cs            # Win32 P/Invoke 声明
+src/
+├── MacroClicker/            # Windows 桌面端（.NET 10 WinForms）
+│   ├── Program.cs           # 入口
+│   ├── MainForm.cs          # 主窗口（工具栏 / 事件列表 / 设置面板 / 全局热键）
+│   ├── EventEditForm.cs     # 事件编辑对话框
+│   ├── UiTheme.cs           # 主题系统：深/浅色板 + 自绘圆角按钮/卡片/输入框/列表
+│   ├── Recorder.cs          # 录制器：原始输入 → 语义化事件（点击/组合键/拖拽）
+│   ├── Player.cs            # 回放引擎：循环 / 倍速 / 暂停 / 急停
+│   ├── GlobalHook.cs        # 全局键盘/鼠标低级钩子（WH_*_LL）
+│   ├── Simulator.cs         # SendInput 输入模拟
+│   ├── KeyMap.cs            # 虚拟键码 <-> 可读名称
+│   ├── MacroEvent.cs        # 事件模型
+│   ├── MacroStore.cs        # 宏 JSON 保存/加载、设置持久化
+│   └── Win32.cs             # Win32 P/Invoke 声明
+└── MacroClicker.Mobile/     # Android 手机端（Kotlin）
+    ├── build.gradle.kts     # AGP 8.7 / Kotlin 2.0 / minSdk 26
+    └── app/src/main/
+        ├── AndroidManifest.xml
+        ├── java/com/macroclicker/mobile/
+        │   ├── model/MacroConfig.kt          # 事件/配置模型（兼容桌面端宏 JSON）
+        │   ├── store/ConfigStore.kt          # 配置持久化 + 屏幕尺寸/坐标换算
+        │   ├── service/ClickService.kt       # 无障碍服务：dispatchGesture 回放引擎
+        │   ├── overlay/FloatingControls.kt   # 悬浮球 + 控制面板（可拖动/位置记忆）
+        │   ├── overlay/PickOverlay.kt        # 全屏取点浮层（点哪取哪/标记可删）
+        │   └── ui/                           # 主界面 / 列表适配器 / 编辑对话框
+        └── res/                              # 布局与资源（dp/sp，深浅色跟随系统）
 ```
 
 ## 宏文件格式
@@ -96,10 +157,13 @@ src/MacroClicker/
 }
 ```
 
-`delay` = 执行该事件前需等待的秒数。事件类型：`mouse_click` / `mouse_down` / `mouse_up` / `move` / `wheel` / `key` / `hotkey` / `wait`。
+`delay` = 执行该事件前需等待的秒数。桌面端事件类型：`mouse_click` / `mouse_down` / `mouse_up` / `move` / `wheel` / `key` / `hotkey` / `wait`。
+
+手机版使用同一结构，事件类型为 `tap` / `swipe` / `wait`，并附带 `screen`（保存时的屏幕分辨率，跨设备导入时自动按比例换算坐标）与 `settings`（执行模式）扩展字段；导入桌面端宏时会自动把 `mouse_click` 映射为 `tap`、`wait` 保持不变。
 
 ## 注意事项
 
-- 点击使用**屏幕绝对坐标**，回放前请保持目标窗口位置与录制时一致
+- 点击使用**屏幕绝对坐标**，回放前请保持目标窗口位置与录制时一致（手机版跨设备导入时会自动按分辨率比例换算）
 - 管理员权限窗口中的操作可能无法被录制/回放（钩子与 SendInput 权限限制），必要时以管理员身份运行本程序
-- 部分游戏使用驱动级输入或反作弊系统，可能拦截模拟输入
+- 部分游戏使用驱动级输入或反作弊系统，可能拦截模拟输入（手机端同理，部分 App 会屏蔽无障碍手势）
+- 请勿将本工具用于违反目标平台规则的场景

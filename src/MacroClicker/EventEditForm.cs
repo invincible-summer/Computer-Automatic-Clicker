@@ -18,8 +18,10 @@ internal sealed class EventEditForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MinimizeBox = false;
         MaximizeBox = false;
-        Font = new Font("Microsoft YaHei UI", 9F);
+        ShowInTaskbar = false;
+        Font = UiTheme.BaseFont;
         AutoScaleMode = AutoScaleMode.Dpi;
+        DoubleBuffered = true;
 
         var table = new TableLayoutPanel
         {
@@ -135,8 +137,8 @@ internal sealed class EventEditForm : Form
             Row("说明", new Label { Text = "等待事件：执行到该行时停留上方设置的秒数", AutoSize = true });
         }
 
-        var btnOk = new Button { Text = "确定", DialogResult = DialogResult.OK, AutoSize = true };
-        var btnCancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, AutoSize = true };
+        var btnOk = new AppButton { Text = "确定", DialogResult = DialogResult.OK, Variant = AppVariant.Primary };
+        var btnCancel = new AppButton { Text = "取消", DialogResult = DialogResult.Cancel, Variant = AppVariant.Ghost };
         btnOk.Click += (s, e) =>
         {
             if (!ValidateAndApply()) DialogResult = DialogResult.None;
@@ -147,7 +149,7 @@ internal sealed class EventEditForm : Form
             Dock = DockStyle.Bottom,
             FlowDirection = FlowDirection.RightToLeft,
             AutoSize = true,
-            Padding = new Padding(8, 6, 8, 8)
+            Padding = new Padding(10, 6, 10, 10)
         };
         bottom.Controls.Add(btnCancel);
         bottom.Controls.Add(btnOk);
@@ -157,8 +159,9 @@ internal sealed class EventEditForm : Form
         AcceptButton = btnOk;
         CancelButton = btnCancel;
 
-        var height = table.PreferredSize.Height + bottom.PreferredSize.Height + 44;
-        ClientSize = new Size(420, height);
+        var height = table.PreferredSize.Height + bottom.PreferredSize.Height + 46;
+        ClientSize = new Size(430, height);
+        UiTheme.Apply(this);
     }
 
     private bool ValidateAndApply()

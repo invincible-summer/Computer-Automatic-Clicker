@@ -6,19 +6,23 @@ namespace MacroClicker;
 internal sealed class MainForm : Form
 {
     private enum AppState { Idle, Recording, Playing, Paused }
+    private enum StatusKind { Info, Good, Warn, Bad }
 
     private readonly Recorder _recorder = new();
     private readonly Player _player = new();
 
-    private readonly ListView _lv;
-    private readonly Button _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay;
-    private readonly Button _btnSave, _btnLoad, _btnClear;
+    private readonly AppListView _lv;
+    private readonly AppButton _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay;
+    private readonly AppButton _btnSave, _btnLoad, _btnClear, _btnTheme;
     private readonly TextBox _txtName;
     private readonly ComboBox _cmbMode, _cmbSpeed;
     private readonly NumericUpDown _numCount, _numInterval, _numCountdown;
     private readonly CheckBox _ckKeys, _ckClicks, _ckWheel, _ckDrags, _ckMoves, _ckFailsafe;
-    private readonly GroupBox _gRec, _gPlay;
+    private readonly AppCard _gRec, _gPlay;
+    private readonly Panel _toolbar;
+    private ContextMenuStrip? _menu;
     private readonly ToolStripStatusLabel _lblStatus, _lblCount, _lblHotkeys;
+    private StatusKind _statusKind = StatusKind.Info;
 
     private AppState _state = AppState.Idle;
     private bool _failSafeTriggered;
@@ -27,28 +31,34 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
+        UiTheme.SetDark(MacroStore.ReadThemeDark());
         Text = "宏连点器 · Macro Clicker";
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(1060, 640);
         MinimumSize = new Size(920, 540);
-        Font = new Font("Microsoft YaHei UI", 9F);
+        Font = UiTheme.BaseFont;
+        KeyPreview = false;
+        DoubleBuffered = true;
 
         // ---------- 顶部工具栏 ----------
         var toolbar = new FlowLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 54,
-            Padding = new Padding(8, 10, 8, 4),
+            Height = 58,
+            Padding = new Padding(10, 12, 10, 6),
             WrapContents = false
         };
-        _btnRecord = MkBtn("● 录制");
-        _btnStopRec = MkBtn("■ 停录");
-        _btnPlay = MkBtn("▶ 执行");
-        _btnPause = MkBtn("⏸ 暂停");
-        _btnStopPlay = MkBtn("⏹ 停止");
-        _btnSave = MkBtn("保存");
-        _btnLoad = MkBtn("打开");
-        _btnClear = MkBtn("清空");
+        _toolbar = toolbar;
+        _btnRecord = MkBtn("● 录制", AppVariant.Success);
+        _btnStopRec = MkBtn("■ 停录", AppVariant.Neutral);
+        _btnPlay = MkBtn("▶ 执行", AppVariant.Primary);
+        _btnPause = MkBtn("⏸ 暂停", AppVariant.Neutral);
+        _btnStopPlay = MkBtn("⏹ 停止", AppVariant.Danger);
+        _btnSave = MkBtn("保存", AppVariant.Ghost);
+        _btnLoad = MkBtn("打开", AppVariant.Ghost);
+        _btnClear = MkBtn("清空", AppVariant.Ghost);
+        _btnTheme = MkBtn(UiTheme.Dark ? "☀ 浅色" : "🌙 深色", AppVariant.Ghost);
+        _btnTheme.Margin = new Padding(14, 3, 2, 3);
 
         var tt = new ToolTip();
         tt.SetToolTip(_btnRecord, "开始录制 (F6)");
@@ -56,23 +66,25 @@ internal sealed class MainForm : Form
         tt.SetToolTip(_btnPlay, "开始执行 (F8)");
         tt.SetToolTip(_btnPause, "暂停 / 继续 (F9)");
         tt.SetToolTip(_btnStopPlay, "停止一切执行与录制 (F10)");
+        tt.SetToolTip(_btnTheme, "切换深色 / 浅色主题");
 
-        _txtName = new TextBox { Width = 150, Margin = new Padding(10, 6, 2, 2), Text = "" };
+        _txtName = new TextBox { Width = 150, Margin = new Padding(10, 5, 2, 5), Text = "" };
+        var nameWrap = UiTheme.Wrap(_txtName);
+        nameWrap.Margin = new Padding(10, 8, 2, 8);
         toolbar.Controls.AddRange(new Control[]
         {
             _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay,
-            new Panel { Width = 2, Height = 28, Margin = new Padding(8, 4, 8, 4), BackColor = SystemColors.ControlDark },
-            new Label { Text = "宏名称:", AutoSize = true, Margin = new Padding(2, 10, 2, 0) },
-            _txtName, _btnSave, _btnLoad, _btnClear
+            new Panel { Width = 2, Height = 26, Margin = new Padding(10, 9, 10, 9), BackColor = UiTheme.C.Divider },
+            new Label { Text = "宏名称:", AutoSize = true, Margin = new Padding(2, 13, 2, 0) },
+            nameWrap, _btnSave, _btnLoad, _btnClear, _btnTheme
         });
 
         // ---------- 事件列表 ----------
-        _lv = new ListView
+        _lv = new AppListView
         {
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
-            GridLines = true,
             HideSelection = false,
             MultiSelect = true
         };
@@ -80,6 +92,7 @@ internal sealed class MainForm : Form
         _lv.Columns.Add("操作", 240);
         _lv.Columns.Add("间隔(秒)", 90);
         _lv.Columns.Add("参数", 230);
+        UiTheme.StyleList(_lv);
         _lv.ContextMenuStrip = BuildMenu();
         _lv.DoubleClick += (s, e) => EditSelected();
         _lv.KeyDown += (s, e) =>
@@ -88,15 +101,15 @@ internal sealed class MainForm : Form
         };
 
         // ---------- 右侧设置面板 ----------
-        var right = new Panel { Dock = DockStyle.Right, Width = 322, Padding = new Padding(8, 10, 10, 8) };
+        var right = new Panel { Dock = DockStyle.Right, Width = 322, Padding = new Padding(10, 12, 12, 10) };
 
-        _gRec = new GroupBox { Text = "录制选项", Dock = DockStyle.Top, Height = 176 };
-        int ry = 28;
+        _gRec = new AppCard("录制选项") { Dock = DockStyle.Top, Height = 196 };
+        int ry = _gRec.ContentTop + 4;
         CheckBox AddCk(string text, bool check)
         {
-            var ck = new CheckBox { Text = text, AutoSize = true, Location = new Point(14, ry) };
+            var ck = new CheckBox { Text = text, AutoSize = true, Location = new Point(16, ry) };
             _gRec.Controls.Add(ck);
-            ry += 28;
+            ry += 30;
             return ck;
         }
         _ckKeys = AddCk("记录键盘输入（按键 / 组合键）", true);
@@ -105,50 +118,51 @@ internal sealed class MainForm : Form
         _ckDrags = AddCk("记录拖拽（按住并移动）", true);
         _ckMoves = AddCk("记录空闲鼠标移动（事件量大）", false);
 
-        _gPlay = new GroupBox { Text = "执行设置", Dock = DockStyle.Fill, Padding = new Padding(10, 6, 10, 6) };
-        int py = 32;
-        Control Row(string label, Control c)
+        _gPlay = new AppCard("执行设置") { Dock = DockStyle.Fill, Padding = new Padding(10, 6, 10, 6) };
+        int py = _gPlay.ContentTop + 4;
+        Control Row(string label, Control c, int width)
         {
-            _gPlay.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(14, py + 4) });
-            c.Location = new Point(112, py);
-            _gPlay.Controls.Add(c);
-            py += 34;
+            c.Font = UiTheme.BaseFont;
+            c.Width = width;
+            var wrap = UiTheme.Wrap(c);
+            wrap.Location = new Point(118, py - 1);
+            _gPlay.Controls.Add(new Label { Text = label, AutoSize = true, Location = new Point(16, py + 4) });
+            _gPlay.Controls.Add(wrap);
+            py += 36;
             return c;
         }
 
         _cmbMode = (ComboBox)Row("执行模式:", new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Width = 150,
             Items = { "执行一次", "执行指定次数", "无限循环" }
-        });
+        }, 160);
         _cmbMode.SelectedIndex = 0;
 
         _numCount = (NumericUpDown)Row("循环次数:", new NumericUpDown
         {
-            Minimum = 1, Maximum = 999999, Value = 10, Width = 90
-        });
+            Minimum = 1, Maximum = 999999, Value = 10
+        }, 90);
         _cmbMode.SelectedIndexChanged += (s, e) => _numCount.Enabled = _cmbMode.SelectedIndex == 1;
         _numInterval = (NumericUpDown)Row("循环间隔(秒):", new NumericUpDown
         {
-            Minimum = 0, Maximum = 3600, DecimalPlaces = 2, Increment = 0.5M, Value = 0, Width = 90
-        });
+            Minimum = 0, Maximum = 3600, DecimalPlaces = 2, Increment = 0.5M, Value = 0
+        }, 90);
         _cmbSpeed = (ComboBox)Row("播放速度:", new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Width = 90,
             Items = { "0.25x", "0.5x", "1x", "2x", "4x", "8x" }
-        });
+        }, 90);
         _cmbSpeed.SelectedIndex = 2;
         _numCountdown = (NumericUpDown)Row("播放前倒计时(秒):", new NumericUpDown
         {
-            Minimum = 0, Maximum = 10, Value = 0, Width = 90
-        });
+            Minimum = 0, Maximum = 10, Value = 0
+        }, 90);
         _ckFailsafe = new CheckBox
         {
             Text = "紧急停止：鼠标移到屏幕左上角",
             AutoSize = true,
-            Location = new Point(14, py + 6),
+            Location = new Point(16, py + 5),
             Checked = true
         };
         _gPlay.Controls.Add(_ckFailsafe);
@@ -157,8 +171,8 @@ internal sealed class MainForm : Form
         {
             Text = "提示：每行的“间隔”表示执行该行之前\n等待的时间；回放时该时间会除以播放速度。",
             AutoSize = true,
-            ForeColor = SystemColors.GrayText,
-            Location = new Point(14, py + 6)
+            Tag = "sub",
+            Location = new Point(16, py + 5)
         };
         _gPlay.Controls.Add(hint);
 
@@ -169,8 +183,11 @@ internal sealed class MainForm : Form
         var status = new StatusStrip();
         _lblStatus = new ToolStripStatusLabel("就绪") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
         _lblCount = new ToolStripStatusLabel("事件 0");
-        _lblHotkeys = new ToolStripStatusLabel("F6 录制 · F7 停录 · F8 执行 · F9 暂停/继续 · F10 停止");
+        _lblHotkeys = new ToolStripStatusLabel("F6 录制 · F7 停录 · F8 执行 · F9 暂停/继续 · F10 停止") { ForeColor = UiTheme.C.SubText };
         status.Items.AddRange(new ToolStripItem[] { _lblStatus, _lblCount, _lblHotkeys });
+        status.Renderer = UiTheme.Renderer;
+        status.BackColor = UiTheme.C.Panel;
+        status.SizingGrip = false;
 
         // Fill 控件先加入，再依次加入边缘停靠控件
         Controls.Add(_lv);
@@ -185,15 +202,15 @@ internal sealed class MainForm : Form
             _lblCount.Text = $"事件 {MacroEvents.Count}";
         };
 
-        _player.Status += s => Ui(() => { _lblStatus.Text = s; _lblStatus.ForeColor = Color.Green; });
+        _player.Status += s => Ui(() => SetStatus(s, StatusKind.Good));
         _player.AbortedByFailSafe += () => { _failSafeTriggered = true; };
         _player.Finished += ok => Ui(() =>
         {
             var fs = _failSafeTriggered;
             _failSafeTriggered = false;
             SetState(AppState.Idle);
-            _lblStatus.Text = fs ? "⛔ 已触发紧急停止（鼠标左上角）" : ok ? "✔ 执行完成" : "■ 已停止";
-            _lblStatus.ForeColor = fs || !ok ? Color.Firebrick : Color.Green;
+            SetStatus(fs ? "⛔ 已触发紧急停止（鼠标左上角）" : ok ? "✔ 执行完成" : "■ 已停止",
+                fs || !ok ? StatusKind.Bad : StatusKind.Good);
         });
 
         _btnRecord.Click += (s, e) => StartRecording();
@@ -204,18 +221,58 @@ internal sealed class MainForm : Form
         _btnClear.Click += (s, e) => ClearAll();
         _btnSave.Click += (s, e) => SaveMacro();
         _btnLoad.Click += (s, e) => LoadMacro();
+        _btnTheme.Click += (s, e) => UiTheme.SetDark(!UiTheme.Dark);
 
+        UiTheme.Changed += OnThemeChanged;
+        UiTheme.Apply(this);
+        RefreshStatus();
         LoadSettings();
         SetState(AppState.Idle);
         RebuildList();
     }
 
-    private static Button MkBtn(string text) => new()
+    private void OnThemeChanged()
+    {
+        UiTheme.Apply(this);
+        if (_menu != null) UiTheme.StyleMenu(_menu);
+        _toolbar.BackColor = UiTheme.C.Panel;
+        _btnTheme.Text = UiTheme.Dark ? "☀ 浅色" : "🌙 深色";
+        RefreshStatus();
+    }
+
+    private void SetStatus(string text, StatusKind kind)
+    {
+        _statusKind = kind;
+        _lblStatus.Text = text;
+        RefreshStatusColor();
+    }
+
+    private void RefreshStatus()
+    {
+        _lblCount.ForeColor = UiTheme.C.SubText;
+        _lblHotkeys.ForeColor = UiTheme.C.SubText;
+        RefreshStatusColor();
+    }
+
+    private void RefreshStatusColor()
+    {
+        var c = UiTheme.C;
+        _lblStatus.ForeColor = _statusKind switch
+        {
+            StatusKind.Good => c.Success,
+            StatusKind.Warn => c.Warning,
+            StatusKind.Bad => c.Danger,
+            _ => c.Text
+        };
+    }
+
+    private static AppButton MkBtn(string text, AppVariant variant) => new()
     {
         Text = text,
+        Variant = variant,
         AutoSize = true,
-        Padding = new Padding(12, 4, 12, 4),
-        Margin = new Padding(2, 2, 2, 2)
+        Padding = new Padding(14, 5, 14, 5),
+        Margin = new Padding(2, 3, 2, 3)
     };
 
     private void Ui(Action a)
@@ -239,6 +296,7 @@ internal sealed class MainForm : Form
         _btnPlay.Enabled = idle;
         _btnPause.Enabled = s is AppState.Playing or AppState.Paused;
         _btnPause.Text = s == AppState.Paused ? "⏵ 继续" : "⏸ 暂停";
+        _btnPause.Variant = s == AppState.Paused ? AppVariant.Success : AppVariant.Neutral;
         _btnStopPlay.Enabled = s is AppState.Playing or AppState.Paused or AppState.Recording;
         _btnSave.Enabled = idle;
         _btnLoad.Enabled = idle;
@@ -250,7 +308,7 @@ internal sealed class MainForm : Form
         if (idle)
         {
             _lblCount.Text = $"事件 {MacroEvents.Count}";
-            if (_lblStatus.Text is "就绪" or "" or "● 录制中…（按 F7 或点击“停止录制”结束）") _lblStatus.Text = "就绪";
+            if (_lblStatus.Text is "就绪" or "" or "● 录制中…（按 F7 或点击“停止录制”结束）") SetStatus("就绪", StatusKind.Info);
         }
     }
 
@@ -283,8 +341,7 @@ internal sealed class MainForm : Form
             return;
         }
         SetState(AppState.Recording);
-        _lblStatus.Text = "● 录制中…（按 F7 或点击“停止录制”结束）";
-        _lblStatus.ForeColor = Color.Firebrick;
+        SetStatus("● 录制中…（按 F7 或点击“停止录制”结束）", StatusKind.Bad);
     }
 
     private void StopRecording(bool notify)
@@ -292,8 +349,7 @@ internal sealed class MainForm : Form
         if (_state != AppState.Recording) return;
         _recorder.Stop();
         SetState(AppState.Idle);
-        _lblStatus.Text = notify ? $"✔ 录制完成，共 {MacroEvents.Count} 个事件" : "■ 录制已停止";
-        _lblStatus.ForeColor = Color.Black;
+        SetStatus(notify ? $"✔ 录制完成，共 {MacroEvents.Count} 个事件" : "■ 录制已停止", StatusKind.Info);
     }
 
     // ================= 执行 =================
@@ -303,8 +359,7 @@ internal sealed class MainForm : Form
         if (_state is AppState.Playing or AppState.Paused or AppState.Recording) return;
         if (MacroEvents.Count == 0)
         {
-            _lblStatus.Text = "没有可执行的事件，请先录制或打开宏文件";
-            _lblStatus.ForeColor = Color.Firebrick;
+            SetStatus("没有可执行的事件，请先录制或打开宏文件", StatusKind.Bad);
             return;
         }
         double speed = 1.0;
@@ -323,8 +378,7 @@ internal sealed class MainForm : Form
         _failSafeTriggered = false;
         var snapshot = new List<MacroEvent>(MacroEvents);
         SetState(AppState.Playing);
-        _lblStatus.Text = "▶ 开始执行…";
-        _lblStatus.ForeColor = Color.Green;
+        SetStatus("▶ 开始执行…", StatusKind.Good);
         _player.Start(snapshot, settings);
     }
 
@@ -335,15 +389,13 @@ internal sealed class MainForm : Form
         {
             _player.Pause();
             SetState(AppState.Paused);
-            _lblStatus.Text = "⏸ 已暂停（F9 继续）";
-            _lblStatus.ForeColor = Color.DarkOrange;
+            SetStatus("⏸ 已暂停（F9 继续）", StatusKind.Warn);
         }
         else if (_state == AppState.Paused)
         {
             _player.Resume();
             SetState(AppState.Playing);
-            _lblStatus.Text = "▶ 继续执行…";
-            _lblStatus.ForeColor = Color.Green;
+            SetStatus("▶ 继续执行…", StatusKind.Good);
         }
     }
 
@@ -438,6 +490,7 @@ internal sealed class MainForm : Form
     private ContextMenuStrip BuildMenu()
     {
         var m = new ContextMenuStrip();
+        _menu = m;
         var edit = new ToolStripMenuItem("编辑…");
         var del = new ToolStripMenuItem("删除 (Del)");
         var up = new ToolStripMenuItem("上移");
@@ -480,6 +533,7 @@ internal sealed class MainForm : Form
             copy.Enabled = one;
             insClick.Enabled = insKey.Enabled = insWait.Enabled = idle;
         };
+        UiTheme.StyleMenu(m);
         return m;
     }
 
@@ -509,8 +563,7 @@ internal sealed class MainForm : Form
             var name = Path.GetFileNameWithoutExtension(dlg.FileName);
             MacroStore.Save(dlg.FileName, name, MacroEvents);
             _txtName.Text = name;
-            _lblStatus.Text = $"✔ 已保存 {MacroEvents.Count} 个事件 → {dlg.FileName}";
-            _lblStatus.ForeColor = Color.Black;
+            SetStatus($"✔ 已保存 {MacroEvents.Count} 个事件 → {dlg.FileName}", StatusKind.Info);
         }
         catch (Exception ex)
         {
@@ -536,8 +589,7 @@ internal sealed class MainForm : Form
             MacroEvents.AddRange(list);
             _txtName.Text = name;
             RebuildList();
-            _lblStatus.Text = $"✔ 已加载 {list.Count} 个事件";
-            _lblStatus.ForeColor = Color.Black;
+            SetStatus($"✔ 已加载 {list.Count} 个事件", StatusKind.Info);
         }
         catch (Exception ex)
         {
@@ -572,7 +624,8 @@ internal sealed class MainForm : Form
                 RecWheel = _ckWheel.Checked,
                 RecDrags = _ckDrags.Checked,
                 RecMoves = _ckMoves.Checked,
-                LastName = _txtName.Text
+                LastName = _txtName.Text,
+                Theme = UiTheme.Dark ? "dark" : "light"
             };
             Directory.CreateDirectory(MacroStore.MacrosDir);
             File.WriteAllText(Path.Combine(MacroStore.MacrosDir, "config.json"),
@@ -620,7 +673,7 @@ internal sealed class MainForm : Form
                 failed.Add($"F{6 + i}");
         }
         if (failed.Count > 0)
-            _lblStatus.Text = "⚠ 快捷键注册失败（可能被其他程序占用）: " + string.Join(", ", failed);
+            SetStatus("⚠ 快捷键注册失败（可能被其他程序占用）: " + string.Join(", ", failed), StatusKind.Warn);
     }
 
     protected override void WndProc(ref Message m)
@@ -652,6 +705,7 @@ internal sealed class MainForm : Form
         _recorder.Stop();
         _recorder.Dispose();
         for (int i = 1; i <= HotkeyVks.Length; i++) Win32.UnregisterHotKey(Handle, i);
+        UiTheme.Changed -= OnThemeChanged;
         SaveSettings();
         base.OnFormClosing(e);
     }

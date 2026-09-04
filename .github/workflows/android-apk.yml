@@ -1,0 +1,65 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main, 'feature/**', 'feat/**']
+    paths:
+      - "src/MacroClicker.Mobile/**"
+      - ".github/workflows/android-apk.yml"
+  pull_request:
+    paths:
+      - "src/MacroClicker.Mobile/**"
+      - ".github/workflows/android-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 构建手机版 APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/MacroClicker.Mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 准备 Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: 生成签名密钥
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.keystore -alias macroclicker \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass macroclicker -keypass macroclicker \
+            -dname "CN=Macro Clicker, OU=MacroClicker, O=MacroClicker, C=CN"
+
+      - name: 构建 Release APK
+        env:
+          MC_KEYSTORE: release.keystore
+          MC_STORE_PASS: macroclicker
+          MC_KEY_ALIAS: macroclicker
+          MC_KEY_PASS: macroclicker
+        run: gradle assembleRelease --no-daemon
+
+      - name: 整理产物
+        run: |
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk "out/MacroClicker-v${VERSION}-android.apk"
+          ls -lh out
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacroClicker-Android-APK
+          path: src/MacroClicker.Mobile/out/*.apk
+          if-no-files-found: error
