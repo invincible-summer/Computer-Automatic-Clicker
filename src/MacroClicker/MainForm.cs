@@ -34,8 +34,8 @@ internal sealed class MainForm : Form
         UiTheme.SetDark(MacroStore.ReadThemeDark());
         Text = "宏连点器 · Macro Clicker";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1060, 640);
-        MinimumSize = new Size(920, 540);
+        ClientSize = new Size(1224, 660);
+        MinimumSize = new Size(1100, 560);
         Font = UiTheme.BaseFont;
         KeyPreview = false;
         DoubleBuffered = true;
@@ -58,7 +58,7 @@ internal sealed class MainForm : Form
         _btnLoad = MkBtn("打开", AppVariant.Ghost);
         _btnClear = MkBtn("清空", AppVariant.Ghost);
         _btnTheme = MkBtn(UiTheme.Dark ? "☀ 浅色" : "🌙 深色", AppVariant.Ghost);
-        _btnTheme.Margin = new Padding(14, 3, 2, 3);
+        _btnTheme.Margin = new Padding(8, 3, 2, 3);
 
         var tt = new ToolTip();
         tt.SetToolTip(_btnRecord, "开始录制 (F6)");
@@ -68,13 +68,13 @@ internal sealed class MainForm : Form
         tt.SetToolTip(_btnStopPlay, "停止一切执行与录制 (F10)");
         tt.SetToolTip(_btnTheme, "切换深色 / 浅色主题");
 
-        _txtName = new TextBox { Width = 150, Margin = new Padding(10, 5, 2, 5), Text = "" };
+        _txtName = new TextBox { Width = 130, Margin = new Padding(10, 5, 2, 5), Text = "" };
         var nameWrap = UiTheme.Wrap(_txtName);
         nameWrap.Margin = new Padding(10, 8, 2, 8);
         toolbar.Controls.AddRange(new Control[]
         {
             _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay,
-            new Panel { Width = 2, Height = 26, Margin = new Padding(10, 9, 10, 9), BackColor = UiTheme.C.Divider },
+            new Panel { Width = 2, Height = 26, Margin = new Padding(6, 9, 6, 9), BackColor = UiTheme.C.Divider },
             new Label { Text = "宏名称:", AutoSize = true, Margin = new Padding(2, 13, 2, 0) },
             nameWrap, _btnSave, _btnLoad, _btnClear, _btnTheme
         });
@@ -92,6 +92,8 @@ internal sealed class MainForm : Form
         _lv.Columns.Add("操作", 240);
         _lv.Columns.Add("间隔(秒)", 90);
         _lv.Columns.Add("参数", 230);
+        // 最后一列自动填满剩余宽度，避免表头右侧露出未绘制的空白
+        _lv.Columns[3].Width = -2;
         UiTheme.StyleList(_lv);
         _lv.ContextMenuStrip = BuildMenu();
         _lv.DoubleClick += (s, e) => EditSelected();
@@ -271,7 +273,7 @@ internal sealed class MainForm : Form
         Text = text,
         Variant = variant,
         AutoSize = true,
-        Padding = new Padding(14, 5, 14, 5),
+        Padding = new Padding(11, 5, 11, 5),
         Margin = new Padding(2, 3, 2, 3)
     };
 
