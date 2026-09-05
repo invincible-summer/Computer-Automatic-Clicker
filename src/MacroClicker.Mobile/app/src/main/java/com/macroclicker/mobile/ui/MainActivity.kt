@@ -214,8 +214,14 @@ class MainActivity : AppCompatActivity() {
     // ---------------- 刷新 ----------------
 
     private fun reloadConfig() {
-        persistPending()
-        config = MacroStore.loadCurrent(this)
+        // 先从磁盘读最新内容（录制会在后台替换事件并保存），
+        // 仅当仍是同一宏时才把界面未落盘的设置项合并进去——
+        // 绝不用陈旧的内存 config 直接写盘（否则会覆盖录制结果，v3 潜伏 bug）
+        val fresh = MacroStore.loadCurrent(this)
+        if (fresh.name == config.name && ::binding.isInitialized) {
+            readSettingsFromUiInto(fresh)
+        }
+        config = fresh
         loadSettingsToUi()
         refreshEvents()
         refreshMacroList()
@@ -223,11 +229,20 @@ class MainActivity : AppCompatActivity() {
         refreshDynamicState()
     }
 
-    /** 旧 config 引用的未保存修改（设置项）在重载前落盘。 */
-    private fun persistPending() {
-        if (!::binding.isInitialized) return
-        readSettingsFromUi()
-        MacroStore.save(this, config)
+    private fun readSettingsFromUi() {
+        readSettingsFromUiInto(config)
+    }
+
+    private fun readSettingsFromUiInto(cfg: MacroConfig) {
+        val s = cfg.settings
+        s.loopMode = when (binding.groupMode.checkedButtonId) {
+            R.id.btnModeCount -> 1
+            R.id.btnModeLoop -> 2
+            else -> 0
+        }
+        s.loopCount = binding.etLoopCount.text.toString().toIntOrNull()?.coerceIn(1, 999_999) ?: s.loopCount
+        s.loopInterval = binding.etLoopInterval.text.toString().toDoubleOrNull()?.coerceAtLeast(0.0) ?: s.loopInterval
+        s.countdown = binding.etCountdown.text.toString().toIntOrNull()?.coerceIn(0, 60) ?: s.countdown
     }
 
     private fun refreshPermUi() {
