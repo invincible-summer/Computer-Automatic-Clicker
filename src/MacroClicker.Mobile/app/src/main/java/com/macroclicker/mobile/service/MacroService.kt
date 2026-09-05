@@ -29,9 +29,8 @@ import kotlin.concurrent.thread
 /**
  * 前台服务（specialUse）：宿主悬浮球 + 回放引擎 + 录制引擎。
  *
- * 不使用无障碍服务——手势注入经 Shizuku（ADB shell uid）完成：
- * 快速路径（InputManager.injectInputEvent，毫秒级）失败自动回落
- * 固定 argv 的 /system/bin/input。回放线程同步等待注入结果，失败即停。
+ * 手势注入经系统无障碍服务的「手势派发」（仅坐标手势、不读取屏幕内容）完成：
+ * 回放线程同步等待派发结果，失败即停；服务断开（onUnbind）时状态回调立即停止回放。
  *
  * 生命周期：任何录制/执行开始时自动拉起；「悬浮球常驻」开关（设置页）为 on
  * 时服务保留，否则会话结束即自毁。通知提供「停止一切 / 退出」操作。
@@ -103,7 +102,7 @@ class MacroService : Service() {
     @Volatile
     private var playStop = false
 
-    /** Shizuku 断开（状态离开 READY）时立即停止回放，绝不盲点续跑。 */
+    /** 无障碍服务断开（状态离开 READY）时立即停止回放，绝不盲点续跑。 */
     private val injectorListener: (Injector.State) -> Unit = { s ->
         if (s != Injector.State.READY && isPlaying) {
             stopPlayback()
@@ -120,7 +119,7 @@ class MacroService : Service() {
         instance = this
         createChannel()
         startAsForeground()
-        Injector.bind()
+        Injector.refresh()
         Injector.addStateListener(injectorListener)
         ball = FloatingBall(this).also { it.show() }
         notifyState()
@@ -149,7 +148,6 @@ class MacroService : Service() {
         mainHandler.post { b?.remove() }
         ball = null
         Injector.removeStateListener(injectorListener)
-        Injector.unbind()
         if (instance === this) instance = null
         notifyState()
     }
@@ -215,10 +213,10 @@ class MacroService : Service() {
             ball?.setStatus(getString(R.string.toast_no_events))
             return false
         }
-        Injector.bind()
+        Injector.refresh()
         if (Injector.state != Injector.State.READY) {
-            ball?.setStatus(getString(R.string.shell_not_ready_short))
-            Toast.makeText(this, R.string.shell_not_ready_short, Toast.LENGTH_SHORT).show()
+            ball?.setStatus(getString(R.string.a11y_not_ready_short))
+            Toast.makeText(this, R.string.a11y_not_ready_short, Toast.LENGTH_SHORT).show()
             return false
         }
         isPlaying = true
@@ -303,7 +301,7 @@ class MacroService : Service() {
 
     fun startRecording(liveReplay: Boolean): Boolean {
         if (isPlaying || isRecording) return false
-        // 引擎未就绪时降级为纯标记录制（只记录、不作用于界面）
+        // 服务未就绪时降级为纯标记录制（只记录、不作用于界面）
         val withLive = liveReplay && Injector.state == Injector.State.READY
         if (liveReplay && !withLive) {
             Toast.makeText(this, R.string.rec_live_fallback, Toast.LENGTH_SHORT).show()

@@ -19,28 +19,30 @@
     <string name="perm_disabled">未开启</string>
     <string name="perm_notif_off">已关闭（不影响功能）</string>
 
-    <!-- Shizuku 注入 -->
-    <string name="shell_title">Shizuku（安全注入组件）</string>
-    <string name="shell_desc">本应用通过开源组件 Shizuku 以 ADB shell 权限注入点击/滑动，完全不需要无障碍权限，也不读取任何屏幕内容。</string>
-    <string name="shell_not_installed">未安装 Shizuku</string>
-    <string name="shell_not_running">Shizuku 未运行</string>
-    <string name="shell_unsupported">Shizuku 版本过旧（需 v11+）</string>
-    <string name="shell_unauthorized">Shizuku 未授权本应用</string>
-    <string name="shell_ready">已就绪 ✔（ADB shell 权限）</string>
-    <string name="shell_install">下载</string>
-    <string name="shell_open">打开</string>
-    <string name="shell_authorize">授权</string>
-    <string name="shell_ready_btn">已就绪</string>
-    <string name="shell_help">使用教程</string>
-    <string name="shell_tutorial" formatted="false">三步开启（只需一次）：\n\n1. 安装并打开 Shizuku（开源、免 root）\n\n2. 按其引导启动服务：\n· Android 11+：开发者选项 → 无线调试 → 「使用配对码配对设备」，在 Shizuku 通知/应用内输入配对码启动；\n· Android 8–10：用电脑执行一条 adb 命令启动（Shizuku 首页有复制按钮）。\n\n3. 回到本应用 → 设置 → 点「授权」允许。\n\n常见问题：\n· 重启手机后 Shizuku 需重新启动（Android 11+ 可在其设置里开启「开机自启」）；\n· 小米/ColorOS 等系统请在系统设置中允许 Shizuku「后台弹出」与「后台运行」，避免被省电策略杀掉；\n· 授权随时可在 Shizuku 中撤销。</string>
-    <string name="shell_not_ready_short">Shizuku 未就绪，请到「设置」页连接</string>
+    <!-- 无障碍注入 -->
+    <string name="a11y_service_summary">仅派发手势，不读取任何屏幕内容</string>
+    <string name="a11y_service_desc">宏连点器的手势注入服务：只向屏幕坐标派发点击/滑动手势，不读取任何屏幕内容、不订阅任何事件。开启后即可录制与回放宏。</string>
+    <string name="a11y_title">无障碍服务（手势注入）</string>
+    <string name="a11y_desc">本应用经系统无障碍服务的「手势派发」注入点击/滑动——只发送固定坐标手势，不读取任何屏幕内容、不订阅任何事件，无需安装任何第三方组件。</string>
+    <string name="a11y_off">未开启</string>
+    <string name="a11y_waiting">已开启 · 等待服务连接…</string>
+    <string name="a11y_ready">已就绪 ✔（仅手势派发）</string>
+    <string name="a11y_enable">去开启</string>
+    <string name="a11y_recheck">重新检测</string>
+    <string name="a11y_ready_btn">已就绪</string>
+    <string name="a11y_help">如何开启</string>
+    <string name="a11y_tutorial" formatted="false">开启步骤（只需一次，重启手机后一般自动保持）：\n\n1. 点下方「打开系统设置」；\n\n2. 找到「无障碍」（部分系统在：更多设置 → 无障碍，或 辅助功能）→「已下载的服务 / 已安装的服务」→ 宏连点器；\n\n3. 打开开关并确认（系统会提示「该应用可控制您的设备」——本服务仅派发手势，不读取任何屏幕内容）。\n\n常见问题：\n· 刚开启后显示「等待服务连接」属正常，几秒后自动就绪；长时间未连接请关闭开关再重新打开；\n· 小米/华为等系统请在电池/后台设置中允许本应用后台运行，避免服务被杀；\n· 随时可在系统无障碍设置中关闭本服务以撤销注入能力。</string>
+    <string name="a11y_waiting_title">服务尚未连接</string>
+    <string name="a11y_waiting_msg">系统显示本服务已开启，但还没有连接上。\n\n请稍候几秒后点「重新检测」；若仍未就绪，请在系统设置中把本服务开关关闭再重新打开。</string>
+    <string name="a11y_open_settings">打开系统设置</string>
+    <string name="a11y_not_ready_short">无障碍服务未就绪，请到「设置」页开启</string>
 
     <!-- 注入引擎 -->
     <string name="engine_title">注入引擎</string>
-    <string name="engine_desc">注入经 Shizuku（ADB shell 权限）完成：默认走系统级注入接口（毫秒级、支持高频连点），不可用时自动改用 input 命令兼容模式。</string>
-    <string name="engine_fast">快速注入 ✔ 毫秒级 / 事件</string>
-    <string name="engine_compat">兼容模式 · input 命令（约 0.3~0.5 秒/次）</string>
-    <string name="engine_unknown">连接 Shizuku 后自动探测</string>
+    <string name="engine_desc">注入经系统无障碍服务的「手势派发」完成：只发送固定坐标手势（点击/滑动），不读取任何屏幕内容、不订阅任何事件；服务断开时回放立即停止，绝不盲点续跑。</string>
+    <string name="engine_ready">无障碍手势注入 ✔ 毫秒级/次</string>
+    <string name="engine_waiting">已开启 · 等待服务连接</string>
+    <string name="engine_off">未开启</string>
 
     <!-- 宏库 -->
     <string name="macro_new">新建宏</string>
@@ -98,8 +100,8 @@
     <string name="rec_hint">● 录制中 · 在屏幕上完成动作 · 点悬浮球结束</string>
     <string name="rec_short">● 录制中</string>
     <string name="rec_status">● 录制中 · 已录 %1$d 个动作</string>
-    <string name="rec_live_fallback">Shizuku 未就绪，本次为纯标记录制（不作用于界面）</string>
-    <string name="rec_live_inject_fail">回放同步注入失败（Shizuku 可能已断开）</string>
+    <string name="rec_live_fallback">无障碍服务未就绪，本次为纯标记录制（不作用于界面）</string>
+    <string name="rec_live_inject_fail">回放同步注入失败（无障碍服务可能已断开）</string>
     <string name="toast_record_empty">未录制到任何动作</string>
     <string name="toast_record_done">已录制 %1$d 个动作 ✔</string>
     <string name="toast_record_layer_fail">录制层创建失败，请检查悬浮窗权限</string>
@@ -116,7 +118,7 @@
     <string name="play_start">开始执行</string>
     <string name="play_stop">停止执行</string>
     <string name="playing_short">▶ 执行中</string>
-    <string name="play_hint">快速注入模式下动作几乎瞬时；兼容模式单个动作约 0.3~0.5 秒。事件「执行前等待」仍按录制节奏回放。</string>
+    <string name="play_hint">无障碍手势派发毫秒级完成，动作间隔仍按录制节奏回放；长按/滑动的持续时长与录制一致。</string>
     <string name="toast_no_events">没有可执行的动作，请先录制</string>
     <string name="toast_need_overlay">请先授予悬浮窗权限</string>
     <string name="play_countdown">%1$d 秒后开始…</string>
@@ -124,7 +126,7 @@
     <string name="play_status_round">第 %1$d 轮执行中…</string>
     <string name="play_stopped">已停止</string>
     <string name="play_finished">执行完成 ✔</string>
-    <string name="play_inject_fail">注入失败：Shizuku 连接中断，已停止</string>
+    <string name="play_inject_fail">注入失败：无障碍服务已断开，已停止</string>
 
     <!-- 通知 / 前台服务 -->
     <string name="notif_channel">宏执行与悬浮球</string>
@@ -139,7 +141,7 @@
     <string name="settings_section_about">关于</string>
     <string name="ball_resident">悬浮球常驻</string>
     <string name="ball_resident_desc">在后台保持悬浮控制球；关闭时录制/执行结束即自动停止服务</string>
-    <string name="about_body">版本 %1$s\n开源仓库：github.com/invincible-summer/Computer-Automatic-Clicker\n\n本工具仅用于合法自动化场景。手势注入通过开源组件 Shizuku 以 ADB shell 权限完成（系统级注入接口，失败自动回落 input 命令），全程不读取屏幕内容、不使用无障碍权限；授权可随时在 Shizuku 中撤销。</string>
+    <string name="about_body">版本 %1$s\n开源仓库：github.com/invincible-summer/Computer-Automatic-Clicker\n\n本工具仅用于合法自动化场景。手势注入通过系统无障碍服务的「手势派发」完成（只发送固定坐标手势），全程不读取屏幕内容、不订阅任何事件、无需任何第三方组件；可随时在系统无障碍设置中关闭以撤销。</string>
 
     <!-- 悬浮球面板 -->
     <string name="panel_title">宏连点器</string>

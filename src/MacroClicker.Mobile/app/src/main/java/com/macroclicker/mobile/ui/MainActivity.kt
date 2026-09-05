@@ -30,14 +30,13 @@ import com.macroclicker.mobile.model.MacroConfig
 import com.macroclicker.mobile.model.MacroEvent
 import com.macroclicker.mobile.service.MacroService
 import com.macroclicker.mobile.store.MacroStore
-import rikka.shizuku.Shizuku
 import java.util.Locale
 
 /**
  * 主界面（Material 3 底栏五页）：宏 / 编辑 / 录制 / 执行 / 设置。
  *
- * v4：宏库独立成页（列表 + 导入导出），编辑页专注当前宏事件序列；
- * 注入经 Shizuku（ADB shell，快速路径 + input 兜底），不依赖无障碍服务。
+ * v5：注入通道回归无障碍服务（仅手势派发、不读取屏幕内容，无需任何第三方组件）；
+ * 设置页承载无障碍开启引导（三态状态机识别「已开启但未连接」）。
  * 边到边：状态栏/挖孔→工具栏与底栏、横屏侧边→内容区、输入法→内容区；
  * 预测性返回经 manifest 的 enableOnBackInvokedCallback 开启（无自定义回退逻辑）。
  */
@@ -67,11 +66,10 @@ class MainActivity : AppCompatActivity() {
 
     private val injectorListener: (Injector.State) -> Unit = { refreshPermUi() }
 
-    private val permResultListener = Shizuku.OnRequestPermissionResultListener { reqCode, _ ->
-        if (reqCode == Injector.REQUEST_CODE) {
-            Injector.refresh()
-            refreshPermUi()
-        }
+    /** 「已开启但未连接」一般几秒内自动就绪：回前台延迟复检一次（v1/v2 识别问题兜底）。 */
+    private val injectorRecheck = Runnable {
+        Injector.refresh()
+        refreshPermUi()
     }
 
     private val importLauncher =
@@ -151,12 +149,13 @@ class MainActivity : AppCompatActivity() {
 
         // 设置页
         binding.btnOverlay.setOnClickListener { requestOverlay() }
-        binding.btnShizuku.setOnClickListener { onShizukuButton() }
+        binding.btnShizuku.setOnClickListener { onEnableInjector() }
         binding.btnShizukuHelp.setOnClickListener {
             MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.shell_help)
-                .setMessage(R.string.shell_tutorial)
-                .setPositiveButton(R.string.dialog_ok, null)
+                .setTitle(R.string.a11y_help)
+                .setMessage(R.string.a11y_tutorial)
+                .setPositiveButton(R.string.a11y_open_settings) { _, _ -> openInjectorSettings() }
+                .setNegativeButton(R.string.cancel, null)
                 .show()
         }
         binding.swBall.isChecked = MacroStore.ballEnabled(this)
@@ -174,7 +173,6 @@ class MainActivity : AppCompatActivity() {
             notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        Shizuku.addRequestPermissionResultListener(permResultListener)
         Injector.addStateListener(injectorListener)
 
         switchTab(R.id.tab_macros)
@@ -186,6 +184,8 @@ class MainActivity : AppCompatActivity() {
         MacroService.addStateListener(stateListener)
         Injector.refresh()
         stateListener()
+        // 「已开启但未连接」一般几秒内自动就绪：延迟复检一次
+        binding.root.postDelayed(injectorRecheck, 2000)
     }
 
     override fun onPause() {
@@ -196,8 +196,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        binding.root.removeCallbacks(injectorRecheck)
         Injector.removeStateListener(injectorListener)
-        Shizuku.removeRequestPermissionResultListener(permResultListener)
     }
 
     // ---------------- 页面切换 ----------------
@@ -249,27 +249,24 @@ class MainActivity : AppCompatActivity() {
 
         val state = Injector.state
         val stateText = when (state) {
-            Injector.State.NOT_INSTALLED -> R.string.shell_not_installed
-            Injector.State.NOT_RUNNING -> R.string.shell_not_running
-            Injector.State.UNSUPPORTED -> R.string.shell_unsupported
-            Injector.State.UNAUTHORIZED -> R.string.shell_unauthorized
-            Injector.State.READY -> R.string.shell_ready
+            Injector.State.NOT_ENABLED -> R.string.a11y_off
+            Injector.State.WAITING -> R.string.a11y_waiting
+            Injector.State.READY -> R.string.a11y_ready
         }
         val btnText = when (state) {
-            Injector.State.NOT_INSTALLED, Injector.State.UNSUPPORTED -> R.string.shell_install
-            Injector.State.NOT_RUNNING -> R.string.shell_open
-            Injector.State.UNAUTHORIZED -> R.string.shell_authorize
-            Injector.State.READY -> R.string.shell_ready_btn
+            Injector.State.NOT_ENABLED -> R.string.a11y_enable
+            Injector.State.WAITING -> R.string.a11y_recheck
+            Injector.State.READY -> R.string.a11y_ready_btn
         }
         binding.tvShizukuState.setText(stateText)
         binding.btnShizuku.setText(btnText)
         binding.btnShizuku.isEnabled = state != Injector.State.READY
 
         // 注入引擎模式（设置页 + 执行页徽章 + 录制页提示）
-        val engineRes = when {
-            state != Injector.State.READY -> R.string.engine_unknown
-            Injector.fastMode == true -> R.string.engine_fast
-            else -> R.string.engine_compat
+        val engineRes = when (state) {
+            Injector.State.READY -> R.string.engine_ready
+            Injector.State.WAITING -> R.string.engine_waiting
+            else -> R.string.engine_off
         }
         binding.tvEngineMode.setText(engineRes)
         binding.tvEngineBadge.setText(engineRes)
@@ -278,7 +275,7 @@ class MainActivity : AppCompatActivity() {
             else R.string.record_live_needs_shell
         )
 
-        // 宏库页引导卡：悬浮窗或 Shizuku 未就绪时显示
+        // 宏库页引导卡：悬浮窗或无障碍服务未就绪时显示
         val missing = buildList {
             if (!overlayOk) add(getString(R.string.perm_overlay))
             if (state != Injector.State.READY) add(getString(stateText))
@@ -600,7 +597,7 @@ class MainActivity : AppCompatActivity() {
             MacroService.isPlaying -> MacroService.stopAll()
             config.events.isEmpty() -> toast(R.string.toast_no_events)
             Injector.state != Injector.State.READY -> {
-                toast(R.string.shell_not_ready_short)
+                toast(R.string.a11y_not_ready_short)
                 switchTab(R.id.tab_settings)
             }
             else -> {
@@ -611,26 +608,30 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------------- Shizuku ----------------
+    // ---------------- 无障碍注入 ----------------
 
-    private fun onShizukuButton() {
+    private fun onEnableInjector() {
         Injector.refresh()
         when (Injector.state) {
-            Injector.State.NOT_INSTALLED, Injector.State.UNSUPPORTED ->
-                openUrl("https://shizuku.rikka.app/download/")
-            Injector.State.NOT_RUNNING -> {
-                val launch = packageManager.getLaunchIntentForPackage(Injector.SHIZUKU_PACKAGE)
-                if (launch != null) startActivity(launch)
-                else openUrl("https://shizuku.rikka.app/download/")
-            }
-            Injector.State.UNAUTHORIZED -> Injector.requestPermission()
             Injector.State.READY -> Unit
+            Injector.State.WAITING -> MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.a11y_waiting_title)
+                .setMessage(R.string.a11y_waiting_msg)
+                .setPositiveButton(R.string.a11y_open_settings) { _, _ -> openInjectorSettings() }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            Injector.State.NOT_ENABLED -> MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.a11y_help)
+                .setMessage(R.string.a11y_tutorial)
+                .setPositiveButton(R.string.a11y_open_settings) { _, _ -> openInjectorSettings() }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
         }
         refreshPermUi()
     }
 
-    private fun openUrl(url: String) {
-        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    private fun openInjectorSettings() {
+        runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
     }
 
     // ---------------- 通用 ----------------

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 无障碍服务配置（最小权限形态）：
+     canRetrieveWindowContent=false —— 不读取任何屏幕内容；
+     不声明 accessibilityEventTypes —— 不订阅任何无障碍事件；
+     本服务唯一的职责是通过 dispatchGesture 派发坐标手势。 -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:canRetrieveWindowContent="false"
+    android:summary="@string/a11y_service_summary"
+    android:description="@string/a11y_service_desc" />

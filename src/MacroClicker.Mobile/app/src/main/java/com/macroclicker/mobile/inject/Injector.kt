@@ -1,78 +1,38 @@
 package com.macroclicker.mobile.inject
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
-import android.content.ServiceConnection
-import android.content.pm.PackageManager
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
-import rikka.shizuku.Shizuku
+import android.view.accessibility.AccessibilityManager
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
- * 注入引擎管理器（替代 v3 的 ShellExecutor）：
- * Shizuku 状态机（未安装/未运行/版本过旧/未授权/就绪）+ UserService 绑定 +
- * 快速/兼容通道能力探测 + 注入失败重估。
+ * 无障碍注入引擎管理器（v5.0，替代 v3/v4 的 Shizuku 方案）：
+ * 三态状态机（未开启 / 已开启待连接 / 就绪）+ 手势派发入口。
  *
- * - 就绪后 bind() 绑定 UserService（shell uid），连接成功即 probe() 探测能力，
- *   `fastMode` 供 UI 显示「快速注入 / 兼容模式」（实现内部总会自动回落，双保险）。
- * - tap/swipe 可在任意线程同步调用（Binder 调用）；UI 永不调用。
- * - Binder 断开时状态回退并广播，MacroService 据此「失败即停」。
- * - 仅当「尚未连接」导致失败时会重绑一次重试；已连接后的失败不重试，
- *   避免对已生效的事件造成重复注入。
+ * - 状态识别吸取 v1/v2 教训：不仅查系统「已启用服务」列表，更以服务自身的
+ *   onServiceConnected 静态实例为准——「已开启但未连接」（OEM 延迟/服务被杀）单独成态并引导用户；
+ * - tap/swipe 可在任意线程同步调用（阻塞到手势回调，服务侧有超时保底）；
+ * - 服务断开（onUnbind）→ refresh → 状态回调 → 回放立即停止，绝不盲点续跑。
  */
 object Injector {
 
-    enum class State { NOT_INSTALLED, NOT_RUNNING, UNSUPPORTED, UNAUTHORIZED, READY }
+    enum class State { NOT_ENABLED, WAITING, READY }
 
-    /** 注入通道能力（连接 UserService 后探测；null = 尚未探测）。 */
     @Volatile
-    var fastMode: Boolean? = null
+    var state: State = State.NOT_ENABLED
         private set
-
-    @Volatile
-    var state: State = State.NOT_RUNNING
-        private set
-
-    @Volatile
-    private var service: IInjectorService? = null
-
-    @Volatile
-    private var bound = false
 
     private var appContext: Context? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<(State) -> Unit>()
 
-    val userServiceArgs: Shizuku.UserServiceArgs by lazy {
-        val ctx = appContext ?: throw IllegalStateException("Injector 未初始化")
-        Shizuku.UserServiceArgs(
-            ComponentName(ctx.packageName, InjectorServiceImpl::class.java.name)
-        )
-            .processNameSuffix("injector")
-            .version(2) // v4：AIDL 由 exec(String[]) 换为 tap/swipe/probe，必须换新进程
-            .tag("macro-injector")
-    }
-
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, svc: IBinder?) {
-            service = IInjectorService.Stub.asInterface(svc)
-            fastMode = runCatching { service?.probe() == 1 }.getOrNull()
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            service = null
-            fastMode = null
-        }
-    }
-
-    /** Application.onCreate 调用一次；注册 Shizuku binder 生命周期监听。 */
+    /** Application.onCreate 调用一次。 */
     fun init(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
-        Shizuku.addBinderReceivedListenerSticky { refresh() }
-        Shizuku.addBinderDeadListener { refresh() }
         refresh()
     }
 
@@ -85,81 +45,28 @@ object Injector {
         listeners.remove(l)
     }
 
-    /** 重新评估状态；任何异常都退化为「未运行」。 */
+    /** 重新评估状态；异常一律退化为「未开启」。 */
     fun refresh() {
-        val s = runCatching { evaluate() }.getOrDefault(State.NOT_RUNNING)
+        val s = runCatching { evaluate() }.getOrDefault(State.NOT_ENABLED)
         if (s != state) {
             state = s
-            if (s != State.READY) {
-                service = null
-                fastMode = null
-            }
             mainHandler.post { listeners.forEach { runCatching { it(s) } } }
         }
     }
 
     private fun evaluate(): State {
-        val installed = appContext?.packageManager
-            ?.getLaunchIntentForPackage(SHIZUKU_PACKAGE) != null
-        if (!Shizuku.pingBinder()) return if (installed) State.NOT_RUNNING else State.NOT_INSTALLED
-        if (Shizuku.isPreV11()) return State.UNSUPPORTED
-        return if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED)
-            State.READY else State.UNAUTHORIZED
+        if (InjectorService.instance != null) return State.READY
+        val ctx = appContext ?: return State.NOT_ENABLED
+        val am = ctx.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val expected = ComponentName(ctx, InjectorService::class.java).flattenToString()
+        val enabled = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            .any { it.id == expected }
+        return if (enabled) State.WAITING else State.NOT_ENABLED
     }
 
-    /** 就绪时发起授权请求（binder 存活才可调用）。 */
-    fun requestPermission() {
-        runCatching {
-            if (Shizuku.pingBinder() && !Shizuku.isPreV11() &&
-                Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED
-            ) Shizuku.requestPermission(REQUEST_CODE)
-        }
-    }
-
-    /** 绑定 UserService（幂等）；由前台服务在启动/需要注入时调用。 */
-    fun bind() {
-        refresh()
-        if (state != State.READY || bound) return
-        runCatching {
-            Shizuku.bindUserService(userServiceArgs, connection)
-            bound = true
-        }.onFailure { refresh() }
-    }
-
-    /** 解绑并释放（前台服务销毁时调用）。 */
-    fun unbind() {
-        if (!bound) return
-        runCatching { Shizuku.unbindUserService(userServiceArgs, connection, true) }
-        bound = false
-        service = null
-        fastMode = null
-    }
-
-    val isBound: Boolean get() = service != null
-
-    fun tap(x: Int, y: Int): Boolean = call { it.tap(x, y) }
+    fun tap(x: Int, y: Int): Boolean =
+        InjectorService.instance?.tap(x, y) ?: false
 
     fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Boolean =
-        call { it.swipe(x1, y1, x2, y2, durationMs) }
-
-    /**
-     * 同步注入调用。Binder 尚未就位时会重绑一次并重试（此场景不可能重复注入）；
-     * 已连接后的任何失败都返回 false 并 refresh（binder 可能已死），由调用方决定停止。
-     */
-    private fun call(block: (IInjectorService) -> Int): Boolean {
-        var s = service
-        if (s == null) {
-            bind()
-            s = service ?: return false
-        }
-        return try {
-            block(s) == 0
-        } catch (_: Exception) {
-            refresh()
-            false
-        }
-    }
-
-    const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
-    const val REQUEST_CODE = 10001
+        InjectorService.instance?.swipe(x1, y1, x2, y2, durationMs) ?: false
 }

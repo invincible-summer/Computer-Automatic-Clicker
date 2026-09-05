@@ -346,7 +346,7 @@
                             android:paddingTop="3dp"
                             android:paddingBottom="3dp"
                             android:background="@drawable/bg_pill"
-                            android:text="@string/engine_unknown"
+                            android:text="@string/engine_off"
                             android:textColor="?attr/colorOnPrimaryContainer"
                             android:textSize="12sp" />
                     </LinearLayout>
@@ -581,14 +581,14 @@
                                 <TextView
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="@string/shell_title"
+                                    android:text="@string/a11y_title"
                                     android:textAppearance="?attr/textAppearanceBodyLarge" />
 
                                 <TextView
                                     android:id="@+id/tvShizukuState"
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="@string/shell_not_running"
+                                    android:text="@string/a11y_off"
                                     android:textColor="?attr/colorOnSurfaceVariant"
                                     android:textSize="13sp" />
                             </LinearLayout>
@@ -598,7 +598,7 @@
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="@string/shell_open" />
+                                android:text="@string/a11y_enable" />
                         </LinearLayout>
 
                         <com.google.android.material.button.MaterialButton
@@ -607,7 +607,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="@string/shell_help" />
+                            android:text="@string/a11y_help" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -636,7 +636,7 @@
                             android:id="@+id/tvEngineMode"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/engine_unknown"
+                            android:text="@string/engine_off"
                             android:textAppearance="?attr/textAppearanceTitleSmall" />
 
                         <TextView
