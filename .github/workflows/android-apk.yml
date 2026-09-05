@@ -52,7 +52,29 @@ jobs:
           MC_STORE_PASS: macroclicker2020
           MC_KEY_ALIAS: macroclicker
           MC_KEY_PASS: macroclicker2020
-        run: gradle assembleRelease --no-daemon
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon 2>&1 | tee gradle-build.log
+
+      - name: 构建失败时输出错误摘要（注解）并推送日志分支
+        if: failure()
+        working-directory: src/MacroClicker.Mobile
+        run: |
+          set +e
+          # 错误行以注解输出（API/邮件可见）
+          grep -E "^e: |error: |What went wrong|FAILURE: |Execution failed|Caused by" gradle-build.log | head -40 | while IFS= read -r line; do
+            echo "::error::${line:0:220}"
+          done
+          # 兜底：完整日志推到 ci-logs 分支
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan "ci-logs-$GITHUB_RUN_NUMBER"
+          git rm -rf --quiet .
+          cp gradle-build.log ./gradle-build.log 2>/dev/null || cp "$GITHUB_WORKSPACE/src/MacroClicker.Mobile/gradle-build.log" ./gradle-build.log
+          git add gradle-build.log
+          git commit -m "ci-debug: build log for run $GITHUB_RUN_NUMBER"
+          git push --force origin "HEAD:ci-logs"
+          exit 1
 
       - name: 整理产物到 publish/android（替换旧 APK）
         run: |
