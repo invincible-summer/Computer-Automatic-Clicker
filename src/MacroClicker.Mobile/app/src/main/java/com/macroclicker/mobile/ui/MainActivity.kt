@@ -544,18 +544,6 @@ class MainActivity : AppCompatActivity() {
         binding.etCountdown.setText(s.countdown.toString())
     }
 
-    private fun readSettingsFromUi() {
-        val s = config.settings
-        s.loopMode = when (binding.groupMode.checkedButtonId) {
-            R.id.btnModeCount -> 1
-            R.id.btnModeLoop -> 2
-            else -> 0
-        }
-        s.loopCount = binding.etLoopCount.text.toString().toIntOrNull()?.coerceIn(1, 999_999) ?: s.loopCount
-        s.loopInterval = binding.etLoopInterval.text.toString().toDoubleOrNull()?.coerceAtLeast(0.0) ?: s.loopInterval
-        s.countdown = binding.etCountdown.text.toString().toIntOrNull()?.coerceIn(0, 60) ?: s.countdown
-    }
-
     private fun persistSettings() {
         if (!::binding.isInitialized) return
         readSettingsFromUi()
