@@ -17,6 +17,7 @@ object MacroStore {
     private const val PREFS = "macro_store"
     private const val KEY_CURRENT = "current_macro"
     private const val KEY_LIVE_REPLAY = "live_replay"
+    private const val KEY_BALL = "ball_enabled"
 
     fun macrosDir(ctx: Context): File =
         File(ctx.filesDir, "macros").apply { mkdirs() }
@@ -96,10 +97,14 @@ object MacroStore {
         prefs(ctx).edit().putString(KEY_CURRENT, name).apply()
     }
 
-    /** 当前宏；不存在（首次/被删）时创建默认空宏。 */
+    /** 当前宏；不存在（首次/被删）时回退到最近修改的宏，避免产生“宏 1”幽灵文件。 */
     fun loadCurrent(ctx: Context): MacroConfig {
         val name = currentName(ctx)
-        return load(ctx, name) ?: MacroConfig(name = name)
+        load(ctx, name)?.let { return it }
+        val fallback = list(ctx).firstOrNull()
+            ?: return MacroConfig(name = "宏 1")
+        setCurrentName(ctx, fallback)
+        return load(ctx, fallback) ?: MacroConfig(name = fallback)
     }
 
     fun liveReplay(ctx: Context): Boolean =
@@ -107,6 +112,14 @@ object MacroStore {
 
     fun setLiveReplay(ctx: Context, value: Boolean) {
         prefs(ctx).edit().putBoolean(KEY_LIVE_REPLAY, value).apply()
+    }
+
+    /** 悬浮球常驻（前台服务保活）开关；关闭时会话结束即停止服务。 */
+    fun ballEnabled(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_BALL, false)
+
+    fun setBallEnabled(ctx: Context, value: Boolean) {
+        prefs(ctx).edit().putBoolean(KEY_BALL, value).apply()
     }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

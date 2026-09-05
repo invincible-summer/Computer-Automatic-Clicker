@@ -69,8 +69,11 @@ class EventsAdapter(
     }
 
     fun submit(newEvents: List<MacroEvent>) {
+        // 先快照：调用方可能传入与内部持有的同一列表引用（config.events），
+        // 直接 clear()+addAll(自身) 会把数据清空（v2.0 数据丢失 bug 的根因之一）
+        val snapshot = newEvents.toList()
         events.clear()
-        events.addAll(newEvents)
+        events.addAll(snapshot)
         notifyDataSetChanged()
     }
 }

@@ -14,17 +14,22 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.macroclicker.mobile.R
+import com.macroclicker.mobile.model.EventType
 import com.macroclicker.mobile.model.MacroEvent
 import com.macroclicker.mobile.service.MacroService
+import com.macroclicker.mobile.shell.ShellExecutor
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.math.abs
 
 /**
- * 完整动作录制：全屏录制层捕获用户整套手势流，
+ * 完整动作录制：全屏标记层捕获用户整套手势流，
  * 自动识别 点击 / 长按 / 滑动 / 等待（手势间隔）——与桌面端录制体验一致。
  *
- * 回放同步（liveReplay）：每个手势录制完成后立即经无障碍 dispatchGesture
- * 注入真实应用（层短暂切为 FLAG_NOT_TOUCHABLE 穿透），可边操作边录多步流程；
- * 关闭时为纯演示录制（手势只被记录、不作用于当前界面）。
+ * 回放同步（liveReplay）：每个手势录制完成后立即经 Shizuku（shell uid）
+ * 执行 /system/bin/input tap|swipe 注入真实应用（层短暂切为 FLAG_NOT_TOUCHABLE
+ * 穿透），可边标记边让界面真实响应，支持「点按钮→等弹窗→再点」的多步录制；
+ * 关闭或 Shizuku 未就绪时为纯标记录制（手势只被记录、不作用于界面）。
  */
 class GestureRecorder(
     private val service: MacroService,
@@ -36,8 +41,16 @@ class GestureRecorder(
     var isActive = false
         private set
 
+    @Volatile
+    private var stopping = false
+
     private val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val handler = Handler(Looper.getMainLooper())
+
+    /** 回放同步注入串行执行器：保证层穿透窗口与注入一一对应。 */
+    private val replayExecutor: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "macro-live-replay").apply { isDaemon = true }
+    }
 
     private var layer: FrameLayout? = null
     private var layerParams: WindowManager.LayoutParams? = null
@@ -67,6 +80,7 @@ class GestureRecorder(
     private fun addLayer() {
         if (layer != null) return
         isActive = true
+        stopping = false
 
         val frame = FrameLayout(service)
         frame.setBackgroundColor(0x08000000.toInt()) // 极淡蒙层，提示“正在捕获”
@@ -159,29 +173,45 @@ class GestureRecorder(
         }
         events.add(ev)
         onCountChanged(events.size)
-        if (liveReplay) replay(ev)
+        if (liveReplay && !stopping) replay(ev)
     }
 
-    /** 回放同步：注入刚录下的手势到真实应用，层短暂不可触摸以放行注入。 */
+    /**
+     * 回放同步：在录制层上发生的手势不达应用，改为把等效命令注入层下方应用。
+     * 层在注入期间置 FLAG_NOT_TOUCHABLE 放行（注入事件按坐标命中下层应用），
+     * 同步命令返回后恢复可触摸；注入串行执行，永不阻塞主线程。
+     */
     private fun replay(ev: MacroEvent) {
-        val gesture = service.buildGesture(ev) ?: return
-        setLayerTouch(false)
-        val timeout = if (ev.type == com.macroclicker.mobile.model.EventType.SWIPE)
-            ev.duration.toLong() + 1500 else 2500
-        service.dispatchAsync(gesture, timeout) { setLayerTouch(true) }
+        setLayerTouchNow(false)
+        replayExecutor.execute {
+            val ok = when (ev.type) {
+                EventType.TAP -> ShellExecutor.tap(ev.x, ev.y)
+                EventType.SWIPE -> ShellExecutor.swipe(ev.x, ev.y, ev.x2, ev.y2,
+                    ev.duration.coerceIn(50, 60_000))
+                EventType.WAIT -> true
+            }
+            if (!ok && !stopping) {
+                handler.post {
+                    Toast.makeText(service, R.string.rec_live_inject_fail, Toast.LENGTH_SHORT).show()
+                }
+            }
+            handler.post { setLayerTouchNow(true) }
+        }
     }
 
-    private fun setLayerTouch(enabled: Boolean) {
-        handler.post {
-            val f = layer ?: return@post
-            val p = layerParams ?: return@post
-            p.flags = if (enabled) BASE_FLAGS else BASE_FLAGS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-            runCatching { wm.updateViewLayout(f, p) }
-        }
+    /** 仅主线程调用：切换录制层是否可触摸。 */
+    private fun setLayerTouchNow(enabled: Boolean) {
+        val f = layer ?: return
+        val p = layerParams ?: return
+        p.flags = if (enabled) BASE_FLAGS
+        else BASE_FLAGS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        runCatching { wm.updateViewLayout(f, p) }
     }
 
     /** 保存=true 时把已录事件回传；取消时回传空表。 */
     fun stop(save: Boolean) = handler.post {
+        stopping = true
+        replayExecutor.shutdownNow()
         val f = layer
         layer = null
         layerParams = null

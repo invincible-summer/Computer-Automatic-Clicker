@@ -1,36 +1,47 @@
 package com.macroclicker.mobile.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.macroclicker.mobile.R
 import com.macroclicker.mobile.databinding.ActivityMainBinding
 import com.macroclicker.mobile.model.MacroConfig
+import com.macroclicker.mobile.model.MacroEvent
 import com.macroclicker.mobile.service.MacroService
+import com.macroclicker.mobile.shell.ShellExecutor
 import com.macroclicker.mobile.store.MacroStore
+import rikka.shizuku.Shizuku
 
 /**
- * 主界面：权限引导 → 多宏管理 → 完整动作录制 → 循环执行。
- * 全部布局使用 dp/sp + 权重 + 嵌套滚动，适配不同尺寸机型；跟随系统深浅色与动态取色。
+ * 主界面（Material 3 底栏四页）：宏 / 录制 / 执行 / 设置。
+ *
+ * v3.0：注入不再依赖无障碍服务——由 Shizuku（ADB shell）执行；
+ * 设置页承载 Shizuku 三步引导与悬浮窗/悬浮球开关。
+ * 布局全部 dp/sp + 权重 + 嵌套滚动，适配不同尺寸机型；跟随系统深浅色与动态取色。
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: EventsAdapter
     private var config: MacroConfig = MacroConfig()
-    private var macroNames: List<String> = emptyList()
-    private var suppressSpinner = false
     private var wasBusy = false
+
+    /** 服务异步拉起后待执行的动作（开始录制/执行）。 */
+    private var pendingAction: (() -> Unit)? = null
 
     private val stateListener: () -> Unit = {
         if (!MacroService.isPlaying && !MacroService.isRecording && wasBusy) {
@@ -38,7 +49,20 @@ class MainActivity : AppCompatActivity() {
             reloadConfig()
         }
         wasBusy = MacroService.isPlaying || MacroService.isRecording
+        if (MacroService.isRunning) {
+            pendingAction?.let { it() }
+            pendingAction = null
+        }
         refreshDynamicState()
+    }
+
+    private val shellListener: (ShellExecutor.State) -> Unit = { refreshPermUi() }
+
+    private val permResultListener = Shizuku.OnRequestPermissionResultListener { reqCode, _ ->
+        if (reqCode == ShellExecutor.REQUEST_CODE) {
+            ShellExecutor.refresh()
+            refreshPermUi()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,11 +70,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // 边到边布局：系统栏 inset 作为根内边距
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(0, bars.top, 0, bars.bottom)
-            insets
+        // 边到边布局：根吃状态栏 inset，底栏吃导航栏 inset，内容区吃输入法 inset
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            binding.root.updatePadding(top = sys.top)
+            binding.bottomNav.updatePadding(bottom = sys.bottom)
+            binding.pageContainer.updatePadding(bottom = ime.bottom)
+            WindowInsetsCompat.CONSUMED
         }
 
         adapter = EventsAdapter(
@@ -62,31 +89,28 @@ class MainActivity : AppCompatActivity() {
         binding.recycler.layoutManager = LinearLayoutManager(this)
         binding.recycler.adapter = adapter
 
-        // 权限
-        binding.btnAcc.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-        binding.btnOverlay.setOnClickListener { requestOverlay() }
+        // 底栏导航
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            switchTab(item.itemId)
+            true
+        }
 
         // 宏管理
-        binding.spMacro.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                if (suppressSpinner) return
-                val name = macroNames.getOrNull(pos) ?: return
-                switchMacro(name)
-            }
-
-            override fun onNothingSelected(p: android.widget.AdapterView<*>?) = Unit
-        }
-        binding.btnNewMacro.setOnClickListener { promptName(null) { name -> newMacro(name) } }
-        binding.btnRename.setOnClickListener { promptName(config.name) { name -> renameMacro(name) } }
+        binding.btnSwitchMacro.setOnClickListener { showMacroPicker() }
+        binding.btnNewMacro.setOnClickListener { promptName(null) { newMacro(it) } }
+        binding.btnRename.setOnClickListener { promptName(config.name) { renameMacro(it) } }
         binding.btnDuplicate.setOnClickListener { duplicateMacro() }
         binding.btnDeleteMacro.setOnClickListener { confirmDeleteMacro() }
+        binding.btnAddEvent.setOnClickListener { addEvent() }
+        binding.btnClearEvents.setOnClickListener { confirmClearEvents() }
+        binding.btnGuide.setOnClickListener { switchTab(R.id.tab_settings) }
 
         // 录制
         binding.swLiveReplay.isChecked = MacroStore.liveReplay(this)
         binding.swLiveReplay.setOnCheckedChangeListener { _, checked ->
             MacroStore.setLiveReplay(this, checked)
         }
-        binding.btnRecord.setOnClickListener { startRecording() }
+        binding.btnRecord.setOnClickListener { startRecordingFlow() }
 
         // 执行设置
         binding.chipMode.setOnCheckedStateChangeListener { _, checkedIds ->
@@ -94,12 +118,43 @@ class MainActivity : AppCompatActivity() {
                 if (checkedIds.contains(R.id.chipCount)) View.VISIBLE else View.GONE
         }
         binding.btnPlay.setOnClickListener { onPlayClicked() }
+
+        // 设置页
+        binding.btnOverlay.setOnClickListener { requestOverlay() }
+        binding.btnShizuku.setOnClickListener { onShizukuButton() }
+        binding.btnShizukuHelp.setOnClickListener {
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.shell_help)
+                .setMessage(R.string.shell_tutorial)
+                .setPositiveButton(R.string.dialog_ok, null)
+                .show()
+        }
+        binding.swBall.isChecked = MacroStore.ballEnabled(this)
+        binding.swBall.setOnCheckedChangeListener { _, checked ->
+            MacroStore.setBallEnabled(this, checked)
+            if (checked) MacroService.ensureStarted(this)
+            else MacroService.stopIfIdle(this)
+        }
+        binding.tvAbout.text = getString(R.string.about_body, versionName())
+
+        // Android 13+ 通知权限（前台服务通知展示；拒绝不影响功能）
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+
+        Shizuku.addRequestPermissionResultListener(permResultListener)
+        ShellExecutor.addStateListener(shellListener)
+
+        switchTab(R.id.tab_macro)
     }
 
     override fun onResume() {
         super.onResume()
         reloadConfig()
         MacroService.addStateListener(stateListener)
+        ShellExecutor.refresh()
         stateListener()
     }
 
@@ -109,15 +164,36 @@ class MainActivity : AppCompatActivity() {
         persistSettings()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        ShellExecutor.removeStateListener(shellListener)
+        Shizuku.removeRequestPermissionResultListener(permResultListener)
+    }
+
+    // ---------------- 页面切换 ----------------
+
+    private fun switchTab(id: Int) {
+        persistSettings() // 离开页前把设置快照落盘（尤其执行页的输入框）
+        binding.pageMacro.visibility = if (id == R.id.tab_macro) View.VISIBLE else View.GONE
+        binding.pageRecord.visibility = if (id == R.id.tab_record) View.VISIBLE else View.GONE
+        binding.pagePlay.visibility = if (id == R.id.tab_play) View.VISIBLE else View.GONE
+        binding.pageSettings.visibility = if (id == R.id.tab_settings) View.VISIBLE else View.GONE
+        binding.toolbar.title = when (id) {
+            R.id.tab_record -> getString(R.string.tab_record)
+            R.id.tab_play -> getString(R.string.tab_play)
+            R.id.tab_settings -> getString(R.string.tab_settings)
+            else -> getString(R.string.tab_macro)
+        }
+    }
+
     // ---------------- 刷新 ----------------
 
     private fun reloadConfig() {
         persistPending()
         config = MacroStore.loadCurrent(this)
-        refreshSpinner()
         loadSettingsToUi()
         refreshEvents()
-        refreshPermCard()
+        refreshPermUi()
         refreshDynamicState()
     }
 
@@ -128,37 +204,55 @@ class MainActivity : AppCompatActivity() {
         MacroStore.save(this, config)
     }
 
-    private fun refreshPermCard() {
-        val accOk = MacroService.isReady
+    private fun refreshPermUi() {
+        if (!::binding.isInitialized) return
         val overlayOk = Settings.canDrawOverlays(this)
-        binding.tvAccState.text = getString(if (accOk) R.string.perm_enabled else R.string.perm_disabled)
-        binding.tvOverlayState.text = getString(if (overlayOk) R.string.perm_enabled else R.string.perm_disabled)
-        binding.cardPerm.visibility = if (accOk && overlayOk) View.GONE else View.VISIBLE
-    }
+        binding.tvOverlayState.setText(if (overlayOk) R.string.perm_enabled else R.string.perm_disabled)
+        binding.btnOverlay.isEnabled = !overlayOk
+        binding.btnOverlay.setText(if (overlayOk) R.string.perm_enabled else R.string.perm_go)
 
-    private fun refreshSpinner() {
-        macroNames = MacroStore.list(this)
-        suppressSpinner = true
-        val spinAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, macroNames)
-        spinAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spMacro.adapter = spinAdapter
-        val idx = macroNames.indexOf(config.name)
-        if (idx >= 0) binding.spMacro.setSelection(idx)
-        suppressSpinner = false
+        val state = ShellExecutor.state
+        val (stateText, btnText) = when (state) {
+            ShellExecutor.State.NOT_INSTALLED -> R.string.shell_not_installed to R.string.shell_install
+            ShellExecutor.State.NOT_RUNNING -> R.string.shell_not_running to R.string.shell_open
+            ShellExecutor.State.UNSUPPORTED -> R.string.shell_unsupported to R.string.shell_install
+            ShellExecutor.State.UNAUTHORIZED -> R.string.shell_unauthorized to R.string.shell_authorize
+            ShellExecutor.State.READY -> R.string.shell_ready to R.string.shell_ready_btn
+        }
+        binding.tvShizukuState.setText(stateText)
+        binding.btnShizuku.setText(btnText)
+        binding.btnShizuku.isEnabled = state != ShellExecutor.State.READY
+
+        // 宏页引导卡：悬浮窗或 Shizuku 未就绪时显示
+        val missing = buildList {
+            if (!overlayOk) add(getString(R.string.perm_overlay))
+            if (state != ShellExecutor.State.READY) add(getString(stateText))
+        }
+        binding.cardGuide.visibility = if (missing.isEmpty()) View.GONE else View.VISIBLE
+        binding.tvGuide.text = getString(R.string.guide_title) + "：" +
+                missing.joinToString("；")
+
+        // 录制页提示行
+        binding.tvShellHint.setText(
+            if (state == ShellExecutor.State.READY) R.string.record_live_replay
+            else R.string.record_live_needs_shell
+        )
     }
 
     private fun refreshEvents() {
         adapter.submit(config.events)
         binding.tvEmpty.visibility = if (config.events.isEmpty()) View.VISIBLE else View.GONE
+        binding.tvEventCount.text =
+            getString(R.string.event_count, config.events.size)
+        binding.tvMacroName.text = config.name
     }
 
     private fun refreshDynamicState() {
         if (!::binding.isInitialized) return
         if (MacroService.isPlaying) {
             binding.btnPlay.text = getString(R.string.play_stop)
-            binding.btnPlay.backgroundTintList = android.content.res.ColorStateList.valueOf(
-                MaterialColors.getColor(binding.btnPlay, com.google.android.material.R.attr.colorError)
-            )
+            binding.btnPlay.backgroundTintList = ColorStateList.valueOf(
+                MaterialColors.getColor(binding.btnPlay, com.google.android.material.R.attr.colorError))
         } else {
             binding.btnPlay.text = getString(R.string.play_start)
             binding.btnPlay.backgroundTintList = null
@@ -173,6 +267,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------------- 宏管理 ----------------
+
+    private fun showMacroPicker() {
+        val names = MacroStore.list(this)
+        if (names.isEmpty()) {
+            promptName(null) { newMacro(it) }
+            return
+        }
+        val checked = names.indexOf(config.name)
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.current_macro)
+            .setSingleChoiceItems(names.toTypedArray(), checked) { dlg, which ->
+                dlg.dismiss()
+                if (names[which] != config.name) switchMacro(names[which])
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
 
     private fun switchMacro(name: String) {
         persistSettings()
@@ -210,7 +321,6 @@ class MainActivity : AppCompatActivity() {
         config = MacroConfig(name = name)
         MacroStore.save(this, config)
         MacroStore.setCurrentName(this, name)
-        refreshSpinner()
         loadSettingsToUi()
         refreshEvents()
         toast(R.string.toast_macro_saved)
@@ -224,7 +334,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (MacroStore.rename(this, config.name, name)) {
             config.name = name
-            refreshSpinner()
+            refreshEvents()
             toast(R.string.toast_macro_saved)
         }
     }
@@ -236,11 +346,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         persistSettings()
-        val copy = config.copy(name = copyName, events = config.events.map { it.copy() }.toMutableList())
-        config = copy
-        MacroStore.save(this, copy)
+        config = config.copy(
+            name = copyName,
+            events = config.events.map { it.copy() }.toMutableList()
+        )
+        MacroStore.save(this, config)
         MacroStore.setCurrentName(this, copyName)
-        refreshSpinner()
+        refreshEvents()
         toast(R.string.toast_macro_saved)
     }
 
@@ -255,13 +367,25 @@ class MainActivity : AppCompatActivity() {
     private fun deleteMacro() {
         MacroStore.delete(this, config.name)
         val remaining = MacroStore.list(this)
-        config = if (remaining.isNotEmpty()) MacroConfig(name = remaining.first()) else MacroConfig()
-        MacroStore.setCurrentName(this, config.name)
-        refreshSpinner()
+        // 必须从磁盘真正加载剩余宏内容，否则空 config 会覆盖其文件（旧版数据丢失 bug）
+        config = if (remaining.isNotEmpty()) {
+            MacroStore.setCurrentName(this, remaining.first())
+            MacroStore.loadCurrent(this)
+        } else {
+            MacroConfig(name = "宏 1")
+        }
+        loadSettingsToUi()
         refreshEvents()
     }
 
     // ---------------- 事件操作 ----------------
+
+    private fun addEvent() {
+        val (w, h) = MacroStore.screenSize(this)
+        config.events.add(MacroEvent.tap(w / 2, (h * 2 / 5), 0.5))
+        persistAndRefresh()
+        toast(R.string.toast_event_added)
+    }
 
     private fun moveEvent(pos: Int, delta: Int) {
         val to = pos + delta
@@ -273,6 +397,18 @@ class MainActivity : AppCompatActivity() {
     private fun deleteEvent(pos: Int) {
         config.events.removeAt(pos)
         persistAndRefresh()
+    }
+
+    private fun confirmClearEvents() {
+        if (config.events.isEmpty()) return
+        MaterialAlertDialogBuilder(this)
+            .setMessage(R.string.confirm_clear_events)
+            .setPositiveButton(R.string.dialog_ok) { _, _ ->
+                config.events.clear()
+                persistAndRefresh()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun persistAndRefresh() {
@@ -324,21 +460,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startRecording() {
+    /** 确保前台服务已启动后执行动作（服务异步拉起时挂起待办）。 */
+    private fun withService(action: (MacroService) -> Unit) {
+        val svc = MacroService.instance
+        if (svc != null) {
+            action(svc)
+        } else {
+            pendingAction = { MacroService.instance?.let(action) }
+            MacroService.ensureStarted(this)
+        }
+    }
+
+    private fun startRecordingFlow() {
         when {
-            !MacroService.isReady -> {
-                toast(R.string.toast_need_accessibility)
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
+            MacroService.isRecording -> toast(R.string.rec_short)
             !Settings.canDrawOverlays(this) -> {
                 toast(R.string.toast_need_overlay)
                 requestOverlay()
             }
-            MacroService.isPlaying -> toast(R.string.playing_short)
             else -> {
                 persistSettings()
-                MacroStore.setLiveReplay(this, binding.swLiveReplay.isChecked)
-                MacroService.instance?.startRecording(binding.swLiveReplay.isChecked)
+                val live = binding.swLiveReplay.isChecked
+                MacroStore.setLiveReplay(this, live)
+                withService { it.startRecording(live) }
                 moveTaskToBack(true)
             }
         }
@@ -347,25 +491,51 @@ class MainActivity : AppCompatActivity() {
     private fun onPlayClicked() {
         when {
             MacroService.isPlaying -> MacroService.stopAll()
-            !MacroService.isReady -> {
-                toast(R.string.toast_need_accessibility)
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-            !Settings.canDrawOverlays(this) -> {
-                toast(R.string.toast_need_overlay)
-                requestOverlay()
-            }
             config.events.isEmpty() -> toast(R.string.toast_no_events)
+            ShellExecutor.state != ShellExecutor.State.READY -> {
+                toast(R.string.shell_not_ready_short)
+                switchTab(R.id.tab_settings)
+            }
             else -> {
                 persistSettings()
-                MacroService.instance?.startPlayback(config)
+                withService { it.startPlayback(config) }
                 refreshDynamicState()
             }
         }
     }
 
+    // ---------------- Shizuku ----------------
+
+    private fun onShizukuButton() {
+        ShellExecutor.refresh()
+        when (ShellExecutor.state) {
+            ShellExecutor.State.NOT_INSTALLED, ShellExecutor.State.UNSUPPORTED ->
+                openUrl("https://shizuku.rikka.app/download/")
+            ShellExecutor.State.NOT_RUNNING -> {
+                val launch = packageManager.getLaunchIntentForPackage(ShellExecutor.SHIZUKU_PACKAGE)
+                if (launch != null) startActivity(launch)
+                else openUrl("https://shizuku.rikka.app/download/")
+            }
+            ShellExecutor.State.UNAUTHORIZED -> ShellExecutor.requestPermission()
+            ShellExecutor.State.READY -> Unit
+        }
+        refreshPermUi()
+    }
+
+    private fun openUrl(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    }
+
+    // ---------------- 通用 ----------------
+
     private fun toast(res: Int) = Toast.makeText(this, res, Toast.LENGTH_SHORT).show()
 
     private fun fmtNum(v: Double): String =
         if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
+
+    private fun versionName(): String = try {
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+    } catch (_: Exception) {
+        "?"
+    }
 }

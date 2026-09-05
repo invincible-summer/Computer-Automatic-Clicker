@@ -11,12 +11,13 @@ android {
         applicationId = "com.macroclicker.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 3
+        versionName = "3.0.0"
     }
 
     buildFeatures {
         viewBinding = true
+        aidl = true
     }
 
     signingConfigs {
@@ -64,4 +65,8 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+
+    // Shizuku：以 ADB shell uid 运行 UserService，替代无障碍服务注入手势（v3.0）
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }

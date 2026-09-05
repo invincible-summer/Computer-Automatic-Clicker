@@ -1,49 +1,74 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">宏连点器</string>
-    <string name="app_subtitle">完整动作录制 · 一键循环执行</string>
+    <string name="app_subtitle">录制 · 循环执行 · 不依赖无障碍权限</string>
 
-    <!-- 无障碍服务 -->
-    <string name="accessibility_label">宏连点器</string>
-    <string name="accessibility_desc">本服务仅调用系统手势接口，按你的配置向其他应用注入点击 / 滑动 / 长按，用于宏的录制回放与执行；不读取、不记录任何屏幕内容。</string>
+    <!-- 底栏四页 -->
+    <string name="tab_macro">宏</string>
+    <string name="tab_record">录制</string>
+    <string name="tab_play">执行</string>
+    <string name="tab_settings">设置</string>
 
-    <!-- 权限卡 -->
-    <string name="perm_title">使用前请完成两项授权</string>
-    <string name="perm_accessibility">无障碍服务（手势注入必需）</string>
+    <!-- 权限 / 引导 -->
+    <string name="guide_title">还有准备工作未完成</string>
+    <string name="guide_action">去处理</string>
     <string name="perm_overlay">悬浮窗权限（悬浮球/录制层必需）</string>
     <string name="perm_go">去开启</string>
     <string name="perm_enabled">已开启 ✔</string>
     <string name="perm_disabled">未开启</string>
 
+    <!-- Shizuku 注入 -->
+    <string name="shell_title">Shizuku（安全注入组件）</string>
+    <string name="shell_desc">本应用通过开源组件 Shizuku 以 ADB shell 权限执行点击/滑动，完全不需要无障碍权限，也不读取任何屏幕内容。</string>
+    <string name="shell_not_installed">未安装 Shizuku</string>
+    <string name="shell_not_running">Shizuku 未运行</string>
+    <string name="shell_unsupported">Shizuku 版本过旧（需 v11+）</string>
+    <string name="shell_unauthorized">Shizuku 未授权本应用</string>
+    <string name="shell_ready">已就绪 ✔（ADB shell 权限）</string>
+    <string name="shell_install">下载</string>
+    <string name="shell_open">打开</string>
+    <string name="shell_authorize">授权</string>
+    <string name="shell_ready_btn">已就绪</string>
+    <string name="shell_help">使用教程</string>
+    <string name="shell_tutorial" formatted="false">三步开启（只需一次）：\n\n1. 安装并打开 Shizuku（开源、免 root）\n\n2. 按其引导启动服务：\n· Android 11+：开发者选项 → 无线调试 → 「使用配对码配对设备」，在 Shizuku 内输入配对码启动；\n· Android 10-：用电脑执行一条 adb 命令启动（Shizuku 首页有复制按钮）。\n\n3. 回到本应用 → 设置 → 点「授权」允许。\n\n说明：Shizuku 重启手机后需要重新启动；权限随时可在 Shizuku 中撤销。执行前请确认本页状态为「已就绪」。</string>
+    <string name="shell_not_ready_short">Shizuku 未就绪，请到「设置」页连接</string>
+
     <!-- 宏管理 -->
-    <string name="section_macro">宏与事件</string>
+    <string name="current_macro">当前宏</string>
+    <string name="macro_switch">切换</string>
     <string name="macro_new">新建</string>
     <string name="macro_rename">重命名</string>
     <string name="macro_duplicate">复制</string>
     <string name="macro_delete">删除</string>
-    <string name="empty_events">暂无事件 · 点下方「开始录制」录第一套动作</string>
+    <string name="events_title">事件序列</string>
+    <string name="event_count">%1$d 个事件</string>
+    <string name="event_add">＋ 手动添加</string>
+    <string name="events_clear">清空</string>
+    <string name="empty_events">暂无事件 · 到「录制」页录第一套动作，或手动添加</string>
     <string name="macro_name_hint">宏名称</string>
     <string name="toast_macro_exists">同名宏已存在</string>
     <string name="toast_macro_saved">已保存 ✔</string>
     <string name="toast_macro_empty_name">名称不能为空</string>
     <string name="confirm_delete_macro">确定删除该宏？删除后不可恢复。</string>
     <string name="confirm_clear_events">确定清空当前宏的全部事件？</string>
+    <string name="toast_event_added">已添加点击事件 · 点击行可编辑坐标与间隔</string>
 
     <!-- 录制 -->
-    <string name="section_record">完整动作录制</string>
-    <string name="record_desc">像平时一样连续操作手机即可：点击、滑动、长按与操作间隔会被自动识别成动作序列（与桌面端录制体验一致）。</string>
+    <string name="record_desc">在淡色标记层上像平时一样操作手机：点击、长按、滑动与操作间隔会被自动识别成动作序列（与桌面端体验一致）。开启「回放同步」后，每个动作会立即真实作用于当前界面，支持「点按钮 → 等弹窗 → 再点」的多步流程。</string>
     <string name="record_live_replay">回放同步（边录边执行，推荐）</string>
+    <string name="record_live_needs_shell">回放同步需 Shizuku 就绪，未就绪时自动转为纯标记录制</string>
     <string name="record_start">开始录制</string>
     <string name="rec_hint">● 录制中 · 在屏幕上完成动作 · 点悬浮球结束</string>
     <string name="rec_short">● 录制中</string>
     <string name="rec_status">● 录制中 · 已录 %1$d 个动作</string>
+    <string name="rec_live_fallback">Shizuku 未就绪，本次为纯标记录制（不作用于界面）</string>
+    <string name="rec_live_inject_fail">回放同步注入失败（Shizuku 可能已断开）</string>
     <string name="toast_record_empty">未录制到任何动作</string>
     <string name="toast_record_done">已录制 %1$d 个动作 ✔</string>
     <string name="toast_record_layer_fail">录制层创建失败，请检查悬浮窗权限</string>
     <string name="toast_multi_touch">暂不支持多指手势，该手势已忽略</string>
 
     <!-- 执行 -->
-    <string name="section_play">循环执行</string>
     <string name="mode_once">执行一次</string>
     <string name="mode_count">指定次数</string>
     <string name="mode_loop">无限循环</string>
@@ -53,9 +78,29 @@
     <string name="play_start">开始执行</string>
     <string name="play_stop">停止执行</string>
     <string name="playing_short">▶ 执行中</string>
+    <string name="play_hint">注入经 ADB shell 执行，单个动作约 0.3~0.5 秒；事件间隔建议 ≥ 0.5 秒。</string>
     <string name="toast_no_events">没有可执行的事件，请先录制</string>
-    <string name="toast_need_accessibility">请先开启无障碍服务</string>
     <string name="toast_need_overlay">请先授予悬浮窗权限</string>
+    <string name="play_countdown">%1$d 秒后开始…</string>
+    <string name="play_status_once">执行中…</string>
+    <string name="play_status_round">第 %1$d 轮执行中…</string>
+    <string name="play_stopped">已停止</string>
+    <string name="play_finished">执行完成 ✔</string>
+    <string name="play_inject_fail">注入失败：Shizuku 连接中断，已停止</string>
+
+    <!-- 通知 / 前台服务 -->
+    <string name="notif_channel">宏执行与悬浮球</string>
+    <string name="notif_ready">悬浮球已显示 · 可在其他应用中控制</string>
+    <string name="notif_stop">停止</string>
+    <string name="notif_quit">退出</string>
+
+    <!-- 设置页 -->
+    <string name="settings_section_perm">权限与连接</string>
+    <string name="settings_section_display">显示</string>
+    <string name="ball_resident">悬浮球常驻</string>
+    <string name="ball_resident_desc">在后台保持悬浮控制球；关闭时录制/执行结束即自动停止服务</string>
+    <string name="about_title">关于</string>
+    <string name="about_body">版本 %1$s\n开源仓库：github.com/invincible-summer/Computer-Automatic-Clicker\n\n本工具仅用于合法自动化场景。手势注入通过开源组件 Shizuku 以 ADB shell 权限执行，全程不读取屏幕内容、不使用无障碍权限；授权可随时在 Shizuku 中撤销。</string>
 
     <!-- 悬浮球面板 -->
     <string name="panel_title">宏连点器 · 控制</string>
