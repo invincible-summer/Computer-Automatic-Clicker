@@ -38,6 +38,8 @@ build/
 local.properties
 *.keystore
 !debug.keystore
+# 手机版固定发布签名（工具类应用，随仓库分发以保证 CI 每次构建签名一致、可覆盖安装）
+!release.keystore
 *.jks
 captures/
 .externalNativeBuild/

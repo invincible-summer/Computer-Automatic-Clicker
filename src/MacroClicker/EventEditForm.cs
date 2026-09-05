@@ -5,7 +5,7 @@ internal sealed class EventEditForm : Form
 {
     private readonly MacroEvent _ev;
     private readonly NumericUpDown _numDelay;
-    private NumericUpDown? _numX, _numY, _numDelta;
+    private NumericUpDown? _numX, _numY, _numX2, _numY2, _numDelta, _numDur;
     private ComboBox? _cmbButton, _cmbKey;
     private TextBox? _txtCombo;
     private readonly List<CheckBox> _modChecks = new();
@@ -58,9 +58,10 @@ internal sealed class EventEditForm : Form
         Row("执行前间隔(秒)", _numDelay);
 
         bool hasPos = ev.Type is EventType.MouseClick or EventType.MouseDown or EventType.MouseUp
-                      or EventType.MouseMove or EventType.Wheel;
+                      or EventType.MouseMove or EventType.Wheel or EventType.Swipe;
         if (hasPos)
         {
+            string posLabel = ev.Type == EventType.Swipe ? "起点坐标" : "坐标";
             _numX = new NumericUpDown { Minimum = -50000, Maximum = 50000, Value = Math.Clamp(ev.X, -50000, 50000), Width = 90 };
             _numY = new NumericUpDown { Minimum = -50000, Maximum = 50000, Value = Math.Clamp(ev.Y, -50000, 50000), Width = 90 };
             var p = new FlowLayoutPanel { WrapContents = false, AutoSize = true, Margin = new Padding(0) };
@@ -68,7 +69,35 @@ internal sealed class EventEditForm : Form
             p.Controls.Add(_numX);
             p.Controls.Add(new Label { Text = "Y:", AutoSize = true, Margin = new Padding(8, 9, 2, 0) });
             p.Controls.Add(_numY);
-            Row("坐标", p);
+            Row(posLabel, p);
+        }
+
+        if (ev.Type == EventType.Swipe)
+        {
+            _numX2 = new NumericUpDown { Minimum = -50000, Maximum = 50000, Value = Math.Clamp(ev.X2, -50000, 50000), Width = 90 };
+            _numY2 = new NumericUpDown { Minimum = -50000, Maximum = 50000, Value = Math.Clamp(ev.Y2, -50000, 50000), Width = 90 };
+            var p = new FlowLayoutPanel { WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            p.Controls.Add(new Label { Text = "X:", AutoSize = true, Margin = new Padding(0, 9, 2, 0) });
+            p.Controls.Add(_numX2);
+            p.Controls.Add(new Label { Text = "Y:", AutoSize = true, Margin = new Padding(8, 9, 2, 0) });
+            p.Controls.Add(_numY2);
+            Row("终点坐标", p);
+
+            _numDur = new NumericUpDown
+            {
+                Minimum = 50,
+                Maximum = 60000,
+                Increment = 50,
+                Value = Math.Clamp(ev.DurationMs, 50, 60000),
+                Width = 100
+            };
+            Row("时长(毫秒)", _numDur);
+            Row("说明", new Label
+            {
+                Text = ev.IsLongPress ? "当前为长按（起止点相同）" : "起止点相同即为长按",
+                AutoSize = true,
+                Tag = "sub"
+            });
         }
 
         if (ev.Type is EventType.MouseClick or EventType.MouseDown or EventType.MouseUp)
@@ -121,6 +150,7 @@ internal sealed class EventEditForm : Form
                 "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
                 "enter", "esc", "space", "tab", "backspace", "delete", "insert",
                 "home", "end", "pgup", "pgdn", "up", "down", "left", "right",
+                "back", "menu",
                 "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"
             });
             Row("按键名称", _cmbKey);
@@ -195,6 +225,9 @@ internal sealed class EventEditForm : Form
         _ev.Delay = (double)_numDelay.Value;
         if (_numX != null) _ev.X = (int)_numX.Value;
         if (_numY != null) _ev.Y = (int)_numY.Value;
+        if (_numX2 != null) _ev.X2 = (int)_numX2.Value;
+        if (_numY2 != null) _ev.Y2 = (int)_numY2.Value;
+        if (_numDur != null) _ev.DurationMs = (int)_numDur.Value;
         if (_numDelta != null) _ev.Delta = (int)_numDelta.Value;
         if (_cmbButton != null)
             _ev.Button = _cmbButton.SelectedIndex switch { 1 => "right", 2 => "middle", 3 => "x1", 4 => "x2", _ => "left" };

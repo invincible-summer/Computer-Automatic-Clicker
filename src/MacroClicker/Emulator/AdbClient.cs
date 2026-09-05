@@ -1,11 +1,16 @@
 using System.Diagnostics;
-using System.Drawing;
 using System.Text;
 
 namespace MacroClicker.Emulator;
 
+/// <summary>一台经 adb 可达的安卓设备/模拟器。</summary>
+internal sealed record AdbDevice(string Serial, string State)
+{
+    public bool Online => State == "device";
+}
+
 /// <summary>
-/// adb.exe 命令行封装：连接设备、注入点击/滑动/按键、截图、查询分辨率。
+/// adb.exe 命令行封装：连接/枚举设备、注入 tap/swipe/keyevent、查询分辨率。
 /// 所有操作通过短生命周期进程调用，线程安全；单次 input tap 约有 200-500ms 系统延迟。
 /// </summary>
 internal sealed class AdbClient
@@ -14,7 +19,7 @@ internal sealed class AdbClient
 
     public AdbClient(string adbPath) => AdbPath = adbPath;
 
-    private (int Code, string Output) Run(string args, int timeoutMs = 15000)
+    public (int Code, string Output) Run(string args, int timeoutMs = 15000)
     {
         try
         {
@@ -42,34 +47,6 @@ internal sealed class AdbClient
         }
     }
 
-    private byte[]? RunBytes(string args, int timeoutMs)
-    {
-        try
-        {
-            using var p = Process.Start(new ProcessStartInfo
-            {
-                FileName = AdbPath,
-                Arguments = args,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            })!;
-            using var ms = new MemoryStream();
-            p.StandardOutput.BaseStream.CopyTo(ms);
-            if (!p.WaitForExit(timeoutMs))
-            {
-                try { p.Kill(true); } catch { }
-                return null;
-            }
-            return p.ExitCode == 0 && ms.Length > 8 ? ms.ToArray() : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     /// <summary>连接模拟器 ADB 端口，serial 形如 "127.0.0.1:16384"。</summary>
     public (bool Ok, string Message) Connect(string serial)
     {
@@ -79,7 +56,31 @@ internal sealed class AdbClient
         return (ok, output.Length == 0 ? (ok ? "已连接" : "连接失败") : output);
     }
 
-    private bool Shell(string serial, string command, int timeoutMs = 20000) =>
+    public void Disconnect(string serial)
+    {
+        try { Run($"disconnect {serial}", 8000); } catch { }
+    }
+
+    /// <summary>列出当前 adb 已知的全部设备。</summary>
+    public List<AdbDevice> Devices()
+    {
+        var (_, output) = Run("devices");
+        var list = new List<AdbDevice>();
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("*") || line.StartsWith("List of", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2) list.Add(new AdbDevice(parts[0], parts[1]));
+        }
+        return list;
+    }
+
+    /// <summary>serial 是否在线（adb devices 中状态为 device）。</summary>
+    public bool IsOnline(string serial) => Devices().Any(d => d.Serial == serial && d.Online);
+
+    internal bool Shell(string serial, string command, int timeoutMs = 20000) =>
         Run($"-s {serial} shell {command}", timeoutMs).Code == 0;
 
     public bool Tap(string serial, int x, int y) => Shell(serial, $"input tap {x} {y}");
@@ -113,21 +114,5 @@ internal sealed class AdbClient
                 return new Size(w, h);
         }
         return Size.Empty;
-    }
-
-    /// <summary>截取设备屏幕（screencap -p 输出 PNG），失败返回 null。</summary>
-    public Bitmap? Screencap(string serial)
-    {
-        var png = RunBytes($"-s {serial} exec-out screencap -p", 30000);
-        if (png == null) return null;
-        try
-        {
-            using var ms = new MemoryStream(png);
-            return new Bitmap(ms);
-        }
-        catch
-        {
-            return null;
-        }
     }
 }

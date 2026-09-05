@@ -78,6 +78,9 @@ internal static class Win32
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {

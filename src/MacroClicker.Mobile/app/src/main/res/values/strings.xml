@@ -1,84 +1,87 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">宏连点器</string>
+    <string name="app_subtitle">完整动作录制 · 一键循环执行</string>
 
     <!-- 无障碍服务 -->
-    <string name="accessibility_label">宏连点器 · 手势执行服务</string>
-    <string name="accessibility_desc">开启后，宏连点器可以按您配置的坐标自动执行点击与滑动手势。本服务不会读取屏幕内容。</string>
+    <string name="accessibility_label">宏连点器</string>
+    <string name="accessibility_desc">本服务仅调用系统手势接口，按你的配置向其他应用注入点击 / 滑动 / 长按，用于宏的录制回放与执行；不读取、不记录任何屏幕内容。</string>
 
-    <!-- 权限引导 -->
-    <string name="guide_title">使用前请完成以下授权</string>
-    <string name="guide_accessibility">① 开启无障碍服务（手势执行必需）</string>
-    <string name="guide_overlay">② 允许显示悬浮窗（悬浮控制必需）</string>
-    <string name="status_enabled">已开启</string>
-    <string name="status_disabled">未开启，点击前往</string>
-    <string name="status_granted">已授权</string>
-    <string name="status_denied">未授权，点击前往</string>
+    <!-- 权限卡 -->
+    <string name="perm_title">使用前请完成两项授权</string>
+    <string name="perm_accessibility">无障碍服务（手势注入必需）</string>
+    <string name="perm_overlay">悬浮窗权限（悬浮球/录制层必需）</string>
+    <string name="perm_go">去开启</string>
+    <string name="perm_enabled">已开启 ✔</string>
+    <string name="perm_disabled">未开启</string>
 
-    <!-- 主界面 -->
-    <string name="events_title">执行序列</string>
-    <string name="events_empty">序列为空\n点击下方「添加点击」到屏幕上取点，或添加滑动 / 等待</string>
-    <string name="settings_title">执行设置</string>
-    <string name="mode_label">执行模式</string>
+    <!-- 宏管理 -->
+    <string name="section_macro">宏与事件</string>
+    <string name="macro_new">新建</string>
+    <string name="macro_rename">重命名</string>
+    <string name="macro_duplicate">复制</string>
+    <string name="macro_delete">删除</string>
+    <string name="empty_events">暂无事件 · 点下方「开始录制」录第一套动作</string>
+    <string name="macro_name_hint">宏名称</string>
+    <string name="toast_macro_exists">同名宏已存在</string>
+    <string name="toast_macro_saved">已保存 ✔</string>
+    <string name="toast_macro_empty_name">名称不能为空</string>
+    <string name="confirm_delete_macro">确定删除该宏？删除后不可恢复。</string>
+    <string name="confirm_clear_events">确定清空当前宏的全部事件？</string>
+
+    <!-- 录制 -->
+    <string name="section_record">完整动作录制</string>
+    <string name="record_desc">像平时一样连续操作手机即可：点击、滑动、长按与操作间隔会被自动识别成动作序列（与桌面端录制体验一致）。</string>
+    <string name="record_live_replay">回放同步（边录边执行，推荐）</string>
+    <string name="record_start">开始录制</string>
+    <string name="rec_hint">● 录制中 · 在屏幕上完成动作 · 点悬浮球结束</string>
+    <string name="rec_short">● 录制中</string>
+    <string name="rec_status">● 录制中 · 已录 %1$d 个动作</string>
+    <string name="toast_record_empty">未录制到任何动作</string>
+    <string name="toast_record_done">已录制 %1$d 个动作 ✔</string>
+    <string name="toast_record_layer_fail">录制层创建失败，请检查悬浮窗权限</string>
+    <string name="toast_multi_touch">暂不支持多指手势，该手势已忽略</string>
+
+    <!-- 执行 -->
+    <string name="section_play">循环执行</string>
     <string name="mode_once">执行一次</string>
-    <string name="mode_count">执行指定次数</string>
+    <string name="mode_count">指定次数</string>
     <string name="mode_loop">无限循环</string>
-    <string name="loop_count_label">循环次数</string>
-    <string name="loop_interval_label">轮次间隔(秒)</string>
-    <string name="countdown_label">开始倒计时(秒)</string>
-    <string name="add_tap">添加点击</string>
-    <string name="add_swipe">添加滑动</string>
-    <string name="add_wait">添加等待</string>
-    <string name="start_play">开始执行</string>
-    <string name="stop_play">停止执行</string>
-    <string name="import_macro">导入宏</string>
-    <string name="clear_all">清空</string>
-
-    <!-- 取点 -->
-    <string name="pick_tap_hint">点击屏幕任意位置添加点击点（点标记可删除）</string>
-    <string name="pick_swipe_start">点击滑动【起点】</string>
-    <string name="pick_swipe_end">点击滑动【终点】</string>
-    <string name="pick_done">完成</string>
-    <string name="pick_cancel">取消</string>
-
-    <!-- 编辑事件 -->
-    <string name="edit_title_tap">编辑点击</string>
-    <string name="edit_title_swipe">编辑滑动</string>
-    <string name="edit_title_wait">编辑等待</string>
-    <string name="field_delay">执行前间隔(秒)</string>
-    <string name="field_x">X</string>
-    <string name="field_y">Y</string>
-    <string name="field_x1">起点X</string>
-    <string name="field_y1">起点Y</string>
-    <string name="field_x2">终点X</string>
-    <string name="field_y2">终点Y</string>
-    <string name="field_duration">滑动时长(毫秒)</string>
-    <string name="save">保存</string>
-    <string name="cancel">取消</string>
-    <string name="delete">删除</string>
-
-    <!-- 悬浮面板 -->
-    <string name="panel_title">宏连点器</string>
-    <string name="panel_play">▶ 开始</string>
-    <string name="panel_stop">■ 停止</string>
-    <string name="panel_add_tap">＋点击</string>
-    <string name="panel_add_swipe">＋滑动</string>
-    <string name="panel_list">列表</string>
-    <string name="panel_collapse">收起</string>
-    <string name="panel_status_idle">待命</string>
-
-    <!-- 提示 -->
+    <string name="loop_count">循环次数</string>
+    <string name="loop_interval">循环间隔</string>
+    <string name="countdown_hint">开始前倒计时</string>
+    <string name="play_start">开始执行</string>
+    <string name="play_stop">停止执行</string>
+    <string name="playing_short">▶ 执行中</string>
+    <string name="toast_no_events">没有可执行的事件，请先录制</string>
     <string name="toast_need_accessibility">请先开启无障碍服务</string>
-    <string name="toast_need_overlay">请先允许显示悬浮窗</string>
-    <string name="toast_no_events">请先添加点击或滑动事件</string>
-    <string name="toast_config_saved">已保存</string>
-    <string name="toast_play_done">执行完成 ✔</string>
-    <string name="toast_play_stopped">已停止</string>
-    <string name="toast_import_none">未导入任何支持的事件（支持：点击 / 拖拽 / 等待）</string>
-    <string name="toast_import_ok">导入成功：%1$d 个事件</string>
-    <string name="toast_import_fail">文件解析失败</string>
-    <string name="toast_pick_done">已添加 %1$d 个点击点</string>
-    <string name="toast_swipe_added">已添加滑动手势</string>
-    <string name="confirm_clear">确定清空全部事件？</string>
+    <string name="toast_need_overlay">请先授予悬浮窗权限</string>
+
+    <!-- 悬浮球面板 -->
+    <string name="panel_title">宏连点器 · 控制</string>
+    <string name="panel_status_idle">就绪</string>
+    <string name="panel_record">⏺ 录制</string>
+    <string name="panel_play">▶ 执行</string>
+    <string name="panel_stop">■ 停止</string>
+    <string name="panel_open">⌂ 主界面</string>
+
+    <!-- 事件编辑 -->
+    <string name="event_type">动作类型</string>
+    <string name="event_delay">执行前等待</string>
+    <string name="event_x">起点 X</string>
+    <string name="event_y">起点 Y</string>
+    <string name="event_x2">终点 X</string>
+    <string name="event_y2">终点 Y</string>
+    <string name="event_duration">时长</string>
+    <string name="event_move_up">上移</string>
+    <string name="event_move_down">下移</string>
+    <string name="event_delete">删除</string>
+    <string name="event_type_tap">点击</string>
+    <string name="event_type_swipe">滑动</string>
+    <string name="event_type_long">长按</string>
+    <string name="event_type_wait">等待</string>
+
+    <!-- 通用 -->
     <string name="dialog_ok">确定</string>
+    <string name="cancel">取消</string>
 </resources>

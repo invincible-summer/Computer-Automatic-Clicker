@@ -2,19 +2,19 @@ name: Android APK
 
 on:
   push:
-    branches: [main, 'feature/**', 'feat/**']
-    paths:
-      - "src/MacroClicker.Mobile/**"
-      - ".github/workflows/android-apk.yml"
-  pull_request:
+    branches: [main]
     paths:
       - "src/MacroClicker.Mobile/**"
       - ".github/workflows/android-apk.yml"
   workflow_dispatch:
 
+# 需要 write 权限：构建产物（APK 与固定签名密钥）自动提交回仓库
+permissions:
+  contents: write
+
 jobs:
   build:
-    name: 构建手机版 APK
+    name: 构建并入库手机版 APK
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,32 +34,52 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: 生成签名密钥
+      - name: 准备固定签名密钥（首次生成并入库，保证每次构建签名一致）
         run: |
-          keytool -genkeypair -v \
-            -keystore release.keystore -alias macroclicker \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass macroclicker -keypass macroclicker \
-            -dname "CN=Macro Clicker, OU=MacroClicker, O=MacroClicker, C=CN"
+          KS=release.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v \
+              -keystore "$KS" -storetype PKCS12 \
+              -alias macroclicker -keyalg RSA -keysize 2048 -validity 10950 \
+              -storepass macroclicker2020 -keypass macroclicker2020 \
+              -dname "CN=Macro Clicker, OU=MacroClicker, O=MacroClicker, C=CN"
+            echo "GENERATED_NEW_KEYSTORE=true" >> "$GITHUB_ENV"
+          fi
 
       - name: 构建 Release APK
         env:
           MC_KEYSTORE: release.keystore
-          MC_STORE_PASS: macroclicker
+          MC_STORE_PASS: macroclicker2020
           MC_KEY_ALIAS: macroclicker
-          MC_KEY_PASS: macroclicker
+          MC_KEY_PASS: macroclicker2020
         run: gradle assembleRelease --no-daemon
 
-      - name: 整理产物
+      - name: 整理产物到 publish/android（替换旧 APK）
         run: |
           VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
-          mkdir -p out
-          cp app/build/outputs/apk/release/app-release.apk "out/MacroClicker-v${VERSION}-android.apk"
-          ls -lh out
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p ../../publish/android
+          rm -f ../../publish/android/*.apk
+          cp app/build/outputs/apk/release/app-release.apk "../../publish/android/MacroClicker-v${VERSION}-android.apk"
+          ls -lh ../../publish/android
 
-      - name: 上传 APK
+      - name: 提交 APK（与新生成的密钥）回仓库
+        working-directory: .
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add publish/android
+          [ -f "src/MacroClicker.Mobile/release.keystore" ] && git add "src/MacroClicker.Mobile/release.keystore"
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "ci: 更新 Android APK 产物 (v${VERSION})"
+            git push
+          fi
+
+      - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: MacroClicker-Android-APK
-          path: src/MacroClicker.Mobile/out/*.apk
+          path: publish/android/*.apk
           if-no-files-found: error

@@ -2,46 +2,64 @@ using System.Drawing;
 
 namespace MacroClicker.Emulator;
 
+/// <summary>常见的模拟器窗口进程名（用于通用录制窗口识别）。</summary>
+internal static class EmulatorProcesses
+{
+    public static readonly string[] Names =
+    {
+        "MuMuPlayer", "MuMuPlayerGlobal", "MuMuNxMain", "NemuPlayer",       // 网易 MuMu
+        "dnplayer", "Ld9MuHeadlessWindow", "LdBoxHeadless",                  // 雷电
+        "Nox", "NoxVMHandle", "NoxHandle",                                   // 夜神
+        "MEmu", "MEmuHeadless",                                              // 逍遥
+        "HD-Player", "HD-RunApp",                                            // BlueStacks 蓝叠
+        "TGB", "TBSandbox",                                                  // 腾讯手游助手
+        "qemu-system-x86_64", "emulator-x86_64", "emulator64-x64"            // Google AVD
+    };
+
+    public static bool IsEmulatorProcess(string processName) =>
+        Names.Contains(processName, StringComparer.OrdinalIgnoreCase);
+}
+
 /// <summary>
-/// MuMu 模拟器会话：跟踪模拟器渲染窗口矩形（自适应边框/移动/缩放），
-/// 在「屏幕坐标 ↔ 安卓设备坐标」之间换算，并通过 ADB 注入点击/滑动/按键——
-/// 全程不移动、不占用本机鼠标。
+/// 模拟器/设备会话：保存 serial、设备分辨率与（MuMu 的）实例窗口信息，
+/// 负责录制时的「屏幕坐标 → 设备坐标」换算与回放时的 ADB 注入——全程不占用本机鼠标。
 /// </summary>
 internal sealed class EmulatorSession
 {
     private readonly AdbClient _adb;
-    private readonly Func<List<MuMuInstance>> _requery;
-    private MuMuInstance _inst;
-    private bool _connected;
+    private readonly Func<List<MuMuInstance>>? _mumuRequery;
+    private MuMuInstance? _mumu;
 
-    public EmulatorSession(AdbClient adb, MuMuInstance inst, Func<List<MuMuInstance>> requery)
+    public EmulatorSession(AdbClient adb, string serial, string family, MuMuInstance? mumu = null, Func<List<MuMuInstance>>? mumuRequery = null)
     {
         _adb = adb;
-        _inst = inst;
-        _requery = requery;
+        Serial = serial;
+        Family = family;
+        _mumu = mumu;
+        _mumuRequery = mumuRequery;
     }
 
-    public MuMuInstance Instance => _inst;
-    public string Serial => _inst.Serial;
+    public string Serial { get; }
+    public string Family { get; }
     public Size Device { get; private set; }
     public string LastError { get; private set; } = "";
 
-    public bool IsReady => _connected && Device.Width > 0 && ResolveRenderWindow() != IntPtr.Zero;
+    public bool IsReady => Device.Width > 0 && _adb.IsOnline(Serial);
 
-    public string Describe() =>
-        $"实例 {_inst.Index} · {Serial} · 设备 {Device.Width}×{Device.Height}";
+    public string Describe() => $"{Family} · {Serial} · 设备 {Device.Width}×{Device.Height}";
 
-    /// <summary>连接 ADB 并查询设备分辨率。失败时返回错误信息。</summary>
+    /// <summary>连接并查询设备分辨率。失败返回错误信息。</summary>
     public string Connect()
     {
-        var (ok, msg) = _adb.Connect(Serial);
-        if (!ok)
+        if (Serial.Contains(':'))
         {
-            _connected = false;
-            LastError = msg;
-            return msg;
+            var (ok, msg) = _adb.Connect(Serial);
+            if (!ok)
+            {
+                LastError = msg;
+                return msg;
+            }
         }
-        _connected = true;
         Device = _adb.GetDeviceSize(Serial);
         if (Device.IsEmpty)
         {
@@ -52,71 +70,115 @@ internal sealed class EmulatorSession
         return "";
     }
 
-    // ---------------- 窗口跟踪（自适应边框） ----------------
-
-    /// <summary>渲染子窗口有效则用之（纯渲染区，天然不含标题栏/工具栏边框），否则退回主窗口。</summary>
-    private IntPtr ResolveRenderWindow()
+    /// <summary>设备掉线时尝试重连（一次）。成功返回 true。</summary>
+    public bool TryRecover()
     {
-        if (Win32.IsWindow(_inst.RenderWnd) && Win32.IsWindowVisible(_inst.RenderWnd))
-            return _inst.RenderWnd;
+        if (_adb.IsOnline(Serial)) return true;
+        if (Serial.Contains(':')) _adb.Connect(Serial);
+        if (!_adb.IsOnline(Serial)) return false;
+        if (Device.IsEmpty) Device = _adb.GetDeviceSize(Serial);
+        return Device.Width > 0;
+    }
+
+    // ---------------- 录制时的坐标映射（自适应窗口移动/缩放） ----------------
+
+    /// <summary>MuMu 实例的渲染窗口（纯渲染区，不含标题栏/边框），无效时为 Zero。</summary>
+    private IntPtr RenderWindow()
+    {
+        if (_mumu == null) return IntPtr.Zero;
+        if (Win32.IsWindow(_mumu.RenderWnd) && Win32.IsWindowVisible(_mumu.RenderWnd))
+            return _mumu.RenderWnd;
+        if (Win32.IsWindow(_mumu.MainWnd) && Win32.IsWindowVisible(_mumu.MainWnd))
+            return _mumu.MainWnd;
         return IntPtr.Zero;
     }
 
-    private IntPtr ResolveRenderWindowOrMain()
+    private static Rectangle ClientRectOf(IntPtr hwnd)
     {
-        var render = ResolveRenderWindow();
-        if (render != IntPtr.Zero) return render;
-        if (Win32.IsWindow(_inst.MainWnd)) return _inst.MainWnd;
-        return IntPtr.Zero;
-    }
-
-    /// <summary>窗口失效（模拟器重启等）时按实例索引重新查询句柄与端口。</summary>
-    public void RefreshWindowHandle()
-    {
-        try
-        {
-            var found = _requery().FirstOrDefault(i => i.Index == _inst.Index);
-            if (found != null) _inst = found;
-        }
-        catch { }
-    }
-
-    /// <summary>取渲染区在屏幕上的矩形（含位置与尺寸）。</summary>
-    public bool GetRenderRect(out Rectangle rect)
-    {
-        rect = Rectangle.Empty;
-        var hwnd = ResolveRenderWindowOrMain();
-        if (hwnd == IntPtr.Zero) return false;
-        if (!Win32.GetClientRect(hwnd, out var rc)) return false;
+        if (!Win32.GetClientRect(hwnd, out var rc)) return Rectangle.Empty;
         int w = rc.Right - rc.Left, h = rc.Bottom - rc.Top;
-        if (w <= 0 || h <= 0) return false;
+        if (w <= 0 || h <= 0) return Rectangle.Empty;
         var pt = new Win32.POINT { X = 0, Y = 0 };
-        if (!Win32.ClientToScreen(hwnd, ref pt)) return false;
-        rect = new Rectangle(pt.X, pt.Y, w, h);
+        if (!Win32.ClientToScreen(hwnd, ref pt)) return Rectangle.Empty;
+        return new Rectangle(pt.X, pt.Y, w, h);
+    }
+
+    /// <summary>
+    /// 屏幕 → 设备坐标。优先用 MuMu 实例渲染窗口精确映射；
+    /// 否则取光标处窗口的根窗口，若属于已知模拟器进程则用其客户区映射（适配各类模拟器）。
+    /// </summary>
+    public bool TryMapScreen(int sx, int sy, out Point device)
+    {
+        device = Point.Empty;
+        if (Device.IsEmpty) return false;
+
+        Rectangle rect;
+        var render = RenderWindow();
+        if (render != IntPtr.Zero)
+        {
+            rect = ClientRectOf(render);
+            if (rect.Width <= 0 || !rect.Contains(sx, sy))
+            {
+                // 点不在 MuMu 窗口内：也不允许误映射到其他窗口（多开场景）
+                return false;
+            }
+        }
+        else
+        {
+            // 通用路径：光标处的根窗口须是已知模拟器进程
+            var hwnd = Win32.WindowFromPoint(new Win32.POINT { X = sx, Y = sy });
+            if (hwnd == IntPtr.Zero) return false;
+            var root = Win32.GetAncestor(hwnd, 2);
+            if (root == IntPtr.Zero) root = hwnd;
+            if (!IsEmulatorWindow(root)) return false;
+            rect = ClientRectOf(root);
+            if (rect.Width <= 0 || !rect.Contains(sx, sy)) return false;
+        }
+
+        int x = (int)Math.Round((sx - rect.X) * Device.Width / (double)rect.Width);
+        int y = (int)Math.Round((sy - rect.Y) * Device.Height / (double)rect.Height);
+        device = new Point(Math.Clamp(x, 0, Device.Width - 1), Math.Clamp(y, 0, Device.Height - 1));
         return true;
     }
 
-    // ---------------- 坐标映射 ----------------
-
-    public Point ScreenToDevice(int sx, int sy)
+    private static bool IsEmulatorWindow(IntPtr root)
     {
-        if (!GetRenderRect(out var r) || Device.IsEmpty) return Point.Empty;
-        int x = (int)Math.Round((sx - r.X) * Device.Width / (double)r.Width);
-        int y = (int)Math.Round((sy - r.Y) * Device.Height / (double)r.Height);
-        return new Point(Math.Clamp(x, 0, Device.Width - 1), Math.Clamp(y, 0, Device.Height - 1));
+        try
+        {
+            _ = Win32.GetWindowThreadProcessId(root, out uint pid);
+            if (pid == 0) return false;
+            using var p = System.Diagnostics.Process.GetProcessById((int)pid);
+            return EmulatorProcesses.IsEmulatorProcess(p.ProcessName);
+        }
+        catch { return false; }
     }
 
-    public Point DeviceToScreen(int dx, int dy)
+    /// <summary>当前前台窗口是否属于模拟器（模拟器模式下用于过滤键盘录制）。</summary>
+    public bool EmulatorIsForeground()
     {
-        if (!GetRenderRect(out var r) || Device.IsEmpty) return Point.Empty;
-        int x = r.X + (int)Math.Round(dx * r.Width / (double)Device.Width);
-        int y = r.Y + (int)Math.Round(dy * r.Height / (double)Device.Height);
-        return new Point(x, y);
+        var fg = Win32.GetForegroundWindow();
+        if (fg == IntPtr.Zero) return false;
+        var render = RenderWindow();
+        if (render != IntPtr.Zero)
+        {
+            if (fg == render) return true;
+            var root = Win32.GetAncestor(render, 2);
+            if (root != IntPtr.Zero && fg == root) return true;
+        }
+        return IsEmulatorWindow(fg);
     }
 
-    /// <summary>把宏事件的坐标解析为设备坐标（device 坐标直用，屏幕坐标动态换算）。</summary>
-    public Point Resolve(MacroEvent e) =>
-        e.CoordSpace == "device" ? new Point(e.X, e.Y) : ScreenToDevice(e.X, e.Y);
+    /// <summary>MuMu 实例窗口失效（模拟器重启）时按索引重新查询。</summary>
+    public void RefreshInstance()
+    {
+        try
+        {
+            if (_mumuRequery == null) return;
+            var found = _mumuRequery().FirstOrDefault(i => i.Index == _mumu?.Index);
+            if (found != null) _mumu = found;
+        }
+        catch { }
+    }
 
     // ---------------- 输入注入（不占用本机鼠标） ----------------
 
@@ -127,44 +189,19 @@ internal sealed class EmulatorSession
 
     public bool Key(int keyCode) => _adb.Key(Serial, keyCode);
 
-    /// <summary>滚轮近似：在事件位置以竖直滑动模拟滚动（adb 无滚轮接口）。</summary>
-    public bool Wheel(int devX, int devY, int delta)
+    /// <summary>旧版滚轮事件（device 坐标）近似为竖直滑动。</summary>
+    public bool WheelSwipe(int devX, int devY, int delta)
     {
         int dist = Math.Clamp(Math.Abs(delta) * 2, 120, 600);
         int dir = delta > 0 ? 1 : -1; // 上滚（delta>0）时手指下移
-        return _adb.Swipe(Serial, devX, devY, devX, devY + dir * dist, 180);
+        int y2 = Math.Clamp(devY + dir * dist, 0, Device.Height - 1);
+        return Swipe(devX, devY, devX, y2, 180);
     }
 
-    /// <summary>截取当前模拟器画面（设备分辨率）。</summary>
-    public Bitmap? Capture() => _adb.Screencap(Serial);
-}
-
-/// <summary>常用按键名 → Android keycode 映射（AOSP KeyEvent）。</summary>
-internal static class AndroidKeys
-{
-    private static readonly Dictionary<string, int> Map = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>把宏事件的坐标解析为设备坐标（device 直用；屏幕坐标尝试动态换算）。</summary>
+    public Point Resolve(MacroEvent e)
     {
-        ["enter"] = 66, ["tab"] = 61, ["space"] = 62, ["backspace"] = 67,
-        ["delete"] = 112, ["del"] = 112, ["ins"] = 124, ["insert"] = 124,
-        ["esc"] = 111, ["home"] = 3, ["end"] = 123,
-        ["up"] = 19, ["down"] = 20, ["left"] = 21, ["right"] = 22,
-        ["pgup"] = 92, ["pgdn"] = 93,
-        [","] = 75, ["."] = 76, ["-"] = 69, ["="] = 70, ["/"] = 76,
-        ["f1"] = 131, ["f2"] = 132, ["f3"] = 133, ["f4"] = 134, ["f5"] = 135, ["f6"] = 136,
-        ["f7"] = 137, ["f8"] = 138, ["f9"] = 139, ["f10"] = 140, ["f11"] = 141, ["f12"] = 142
-    };
-
-    public static int FromName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return 0;
-        name = name.Trim();
-        if (Map.TryGetValue(name, out var code)) return code;
-        if (name.Length == 1)
-        {
-            var c = char.ToLowerInvariant(name[0]);
-            if (c is >= 'a' and <= 'z') return 29 + (c - 'a');       // KEYCODE_A..Z
-            if (c is >= '0' and <= '9') return 7 + (c - '0');        // KEYCODE_0..9
-        }
-        return 0;
+        if (e.CoordSpace == "device") return new Point(e.X, e.Y);
+        return TryMapScreen(e.X, e.Y, out var p) ? p : new Point(-1, -1);
     }
 }

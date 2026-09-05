@@ -4,6 +4,11 @@ using MacroClicker.Emulator;
 
 namespace MacroClicker;
 
+/// <summary>
+/// 主窗口：双页面设计 —— 「本机 Windows」与本机鼠标键盘交互；
+/// 「模拟器 ADB」为独立完整页面，通过 ADB 注入输入，不占用本机鼠标。
+/// 顶部工具栏与右侧设置面板作用于当前页面。
+/// </summary>
 internal sealed class MainForm : Form
 {
     private enum AppState { Idle, Recording, Playing, Paused }
@@ -12,43 +17,49 @@ internal sealed class MainForm : Form
     private readonly Recorder _recorder = new();
     private readonly Player _player = new();
 
-    private readonly AppListView _lv;
+    // ---- 数据 ----
+    private readonly List<MacroEvent> _winEvents = new();
+    private readonly List<MacroEvent> _emuEvents = new();
+    private MacroStore.TargetSettings _winSettings = new();
+    private MacroStore.TargetSettings _emuSettings = new();
+    /// <summary>当前 UI 展示/编辑的目标页（切页时先把面板值快照回离开的目标）。</summary>
+    private MacroTarget _curTarget = MacroTarget.Windows;
+
+    // ---- 模拟器（ADB）----
+    private EmulatorSession? _emu;
+    private AdbClient? _adb;
+    private List<EmulatorCandidate> _emuCandidates = new();
+    private Func<List<MuMuInstance>>? _mumuRequery;
+    private bool _discovering;
+
+    // ---- 控件 ----
+    private readonly AppListView _lvWin, _lvEmu;
     private readonly AppButton _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay;
-    private readonly AppButton _btnSave, _btnLoad, _btnClear, _btnTheme;
-    private readonly AppButton _btnEmuConnect, _btnEmuDisconnect, _btnEmuShot;
-    private readonly ComboBox _cmbEmuInst;
-    private readonly CheckBox _ckEmu;
-    private readonly Label _lblEmuStatus;
-    private readonly TextBox _txtName;
+    private readonly AppButton _btnSave, _btnDelete, _btnTheme;
+    private readonly ComboBox _cmbMacro, _cmbDevice;
+    private readonly AppButton _btnRefresh, _btnConnect, _btnDisconnect;
+    private readonly Label _lblDevice;
     private readonly ComboBox _cmbMode, _cmbSpeed;
     private readonly NumericUpDown _numCount, _numInterval, _numCountdown;
-    private readonly CheckBox _ckKeys, _ckClicks, _ckWheel, _ckDrags, _ckMoves, _ckFailsafe;
+    private readonly CheckBox _ckKeys, _ckClicks, _ckWheel, _ckDrags, _ckFailsafe;
     private readonly AppCard _gRec, _gPlay;
-    private readonly Panel _toolbar;
+    private readonly Panel _toolbar, _emuStrip;
+    private readonly TabControl _tabs;
     private ContextMenuStrip? _menu;
     private readonly ToolStripStatusLabel _lblStatus, _lblCount, _lblHotkeys;
     private StatusKind _statusKind = StatusKind.Info;
 
-    // ---- 模拟器（MuMu / ADB）----
-    private EmulatorSession? _emu;
-    private AdbClient? _adb;
-    private List<MuMuInstance> _emuInstances = new();
-    private string? _emuManagerPath;
-
     private AppState _state = AppState.Idle;
     private bool _failSafeTriggered;
-
-    private List<MacroEvent> MacroEvents => _recorder.Events;
 
     public MainForm()
     {
         UiTheme.SetDark(MacroStore.ReadThemeDark());
         Text = "宏连点器 · Macro Clicker";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1224, 660);
-        MinimumSize = new Size(1100, 560);
+        ClientSize = new Size(1240, 700);
+        MinimumSize = new Size(1120, 620);
         Font = UiTheme.BaseFont;
-        KeyPreview = false;
         DoubleBuffered = true;
 
         // ---------- 顶部工具栏 ----------
@@ -66,8 +77,7 @@ internal sealed class MainForm : Form
         _btnPause = MkBtn("⏸ 暂停", AppVariant.Neutral);
         _btnStopPlay = MkBtn("⏹ 停止", AppVariant.Danger);
         _btnSave = MkBtn("保存", AppVariant.Ghost);
-        _btnLoad = MkBtn("打开", AppVariant.Ghost);
-        _btnClear = MkBtn("清空", AppVariant.Ghost);
+        _btnDelete = MkBtn("删除宏", AppVariant.Ghost);
         _btnTheme = MkBtn(UiTheme.Dark ? "☀ 浅色" : "🌙 深色", AppVariant.Ghost);
         _btnTheme.Margin = new Padding(8, 3, 2, 3);
 
@@ -77,118 +87,124 @@ internal sealed class MainForm : Form
         tt.SetToolTip(_btnPlay, "开始执行 (F8)");
         tt.SetToolTip(_btnPause, "暂停 / 继续 (F9)");
         tt.SetToolTip(_btnStopPlay, "停止一切执行与录制 (F10)");
-        tt.SetToolTip(_btnTheme, "切换深色 / 浅色主题");
+        tt.SetToolTip(_btnSave, "保存当前宏（名称取下拉框文本）");
+        tt.SetToolTip(_btnDelete, "删除下拉框选中的宏文件");
 
-        _txtName = new TextBox { Width = 130, Margin = new Padding(10, 5, 2, 5), Text = "" };
-        var nameWrap = UiTheme.Wrap(_txtName);
-        nameWrap.Margin = new Padding(10, 8, 2, 8);
+        _cmbMacro = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDown,
+            Width = 190,
+            Margin = new Padding(10, 5, 2, 5),
+            IntegralHeight = false
+        };
+        var macroWrap = UiTheme.Wrap(_cmbMacro);
+        macroWrap.Margin = new Padding(10, 8, 2, 8);
+        _cmbMacro.TextUpdate += (s, e) => AutoCompleteMacroName();
+        _cmbMacro.SelectedIndexChanged += (s, e) => OnMacroSelected();
+        _cmbMacro.KeyDown += (s, e) =>
+        {
+            // 输入已有宏名后回车 = 直接加载
+            if (e.KeyCode == Keys.Enter)
+            {
+                var path = MacroStore.PathOf(Target, _cmbMacro.Text.Trim());
+                if (File.Exists(path) && _cmbMacro.SelectedIndex < 0)
+                {
+                    var idx = _cmbMacro.Items.IndexOf(_cmbMacro.Text.Trim());
+                    if (idx >= 0) _cmbMacro.SelectedIndex = idx;
+                }
+                e.Handled = true;
+            }
+        };
+
         toolbar.Controls.AddRange(new Control[]
         {
             _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay,
             new Panel { Width = 2, Height = 26, Margin = new Padding(6, 9, 6, 9), BackColor = UiTheme.C.Divider },
-            new Label { Text = "宏名称:", AutoSize = true, Margin = new Padding(2, 13, 2, 0) },
-            nameWrap, _btnSave, _btnLoad, _btnClear, _btnTheme
+            new Label { Text = "宏:", AutoSize = true, Margin = new Padding(2, 14, 2, 0) },
+            macroWrap, _btnSave, _btnDelete,
+            new Panel { Width = 2, Height = 26, Margin = new Padding(6, 9, 6, 9), BackColor = UiTheme.C.Divider },
+            _btnTheme
         });
 
-        // ---------- 事件列表 ----------
-        _lv = new AppListView
+        // ---------- 模拟器连接条（仅模拟器页显示） ----------
+        _emuStrip = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            View = View.Details,
-            FullRowSelect = true,
-            HideSelection = false,
-            MultiSelect = true
+            Dock = DockStyle.Top,
+            Height = 54,
+            Padding = new Padding(10, 10, 10, 4),
+            WrapContents = false,
+            Visible = false
         };
-        _lv.Columns.Add("#", 46);
-        _lv.Columns.Add("操作", 240);
-        _lv.Columns.Add("间隔(秒)", 90);
-        _lv.Columns.Add("参数", 230);
-        // 最后一列自动填满剩余宽度，避免表头右侧露出未绘制的空白
-        _lv.Columns[3].Width = -2;
-        UiTheme.StyleList(_lv);
-        _lv.ContextMenuStrip = BuildMenu();
-        _lv.DoubleClick += (s, e) => EditSelected();
-        _lv.KeyDown += (s, e) =>
+        _lblDevice = new Label
         {
-            if (e.KeyCode == Keys.Delete) { DeleteSelected(); e.Handled = true; }
+            Text = "未连接 · 点击「检测设备」",
+            AutoSize = false,
+            Size = new Size(330, 26),
+            Margin = new Padding(2, 9, 8, 0),
+            Tag = "sub",
+            TextAlign = ContentAlignment.MiddleLeft
         };
+        _cmbDevice = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDown,
+            Width = 330,
+            Margin = new Padding(2, 5, 2, 5),
+            IntegralHeight = false
+        };
+        var deviceWrap = UiTheme.Wrap(_cmbDevice);
+        deviceWrap.Margin = new Padding(2, 8, 2, 8);
+        _btnRefresh = MkBtn("⟳ 检测设备", AppVariant.Neutral);
+        _btnConnect = MkBtn("连接", AppVariant.Primary);
+        _btnDisconnect = MkBtn("断开", AppVariant.Ghost);
+        tt.SetToolTip(_cmbDevice, "下拉选择检测到的设备，或直接输入自定义 serial（如 127.0.0.1:5555）");
+        tt.SetToolTip(_btnRefresh, "自动发现 adb 与常见模拟器（MuMu/雷电/夜神/逍遥/蓝叠等）");
+        _emuStrip.Controls.AddRange(new Control[] { _lblDevice, deviceWrap, _btnRefresh, _btnConnect, _btnDisconnect });
 
-        // ---------- 右侧设置面板（AutoScroll：小屏/矮窗口时自动滚动，内容不裁切） ----------
+        _btnRefresh.Click += (s, e) => DiscoverDevices();
+        _btnConnect.Click += (s, e) => ConnectDevice();
+        _btnDisconnect.Click += (s, e) => DisconnectDevice();
+
+        // ---------- 事件列表 ×2 ----------
+        _lvWin = MkList();
+        _lvEmu = MkList();
+        var tabWin = new TabPage("🖥 本机 Windows") { Padding = new Padding(0, 8, 0, 0) };
+        var tabEmu = new TabPage("📱 模拟器 (ADB)") { Padding = new Padding(0, 8, 0, 0) };
+        tabEmu.Controls.Add(_lvEmu);
+        tabEmu.Controls.Add(_emuStrip);
+        tabWin.Controls.Add(_lvWin);
+
+        _tabs = new TabControl
+        {
+            Dock = DockStyle.Fill
+        };
+        _tabs.TabPages.Add(tabWin);
+        _tabs.TabPages.Add(tabEmu);
+        _tabs.SelectedIndexChanged += (s, e) => OnTabChanged();
+
+        // ---------- 右侧设置面板（作用于当前页面） ----------
         var right = new Panel
         {
             Dock = DockStyle.Right,
-            Width = 322,
+            Width = 320,
             Padding = new Padding(10, 12, 12, 10),
             AutoScroll = true
         };
 
-        // ---------- 模拟器卡片（MuMu / ADB）----------
-        var gEmu = new AppCard("模拟器 (MuMu · ADB)") { Dock = DockStyle.Top, Height = 180 };
-        _lblEmuStatus = new Label
-        {
-            Text = "未连接 · 启动模拟器后点「连接」",
-            Tag = "sub",
-            AutoSize = false,
-            Location = new Point(16, gEmu.ContentTop + 2),
-            Size = new Size(272, 30)
-        };
-        gEmu.Controls.Add(_lblEmuStatus);
-
-        _cmbEmuInst = new ComboBox
-        {
-            DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(16, gEmu.ContentTop + 36),
-            Width = 140
-        };
-        gEmu.Controls.Add(_cmbEmuInst);
-
-        AppButton EmuBtn(string text, AppVariant v, int x, int y)
-        {
-            var b = new AppButton { Text = text, Variant = v, Location = new Point(x, y), AutoSize = true, Padding = new Padding(8, 3, 8, 3) };
-            gEmu.Controls.Add(b);
-            return b;
-        }
-        _btnEmuConnect = EmuBtn("连接", AppVariant.Primary, 164, gEmu.ContentTop + 34);
-        _btnEmuDisconnect = EmuBtn("断开", AppVariant.Ghost, 232, gEmu.ContentTop + 34);
-        _btnEmuShot = EmuBtn("截图取点", AppVariant.Neutral, 16, gEmu.ContentTop + 72);
-        _ckEmu = new CheckBox
-        {
-            Text = "模拟器模式执行（不占鼠标）",
-            AutoSize = true,
-            Location = new Point(16, gEmu.ContentTop + 110)
-        };
-        tt.SetToolTip(_ckEmu, "开启后鼠标事件通过 ADB 注入模拟器（input tap），不移动本机鼠标；F10 仍可急停");
-        gEmu.Controls.Add(_ckEmu);
-
-        _btnEmuConnect.Click += (s, e) => ConnectEmulator();
-        _btnEmuDisconnect.Click += (s, e) => DisconnectEmulator();
-        _btnEmuShot.Click += (s, e) => PickFromScreenshot();
-        _cmbEmuInst.SelectedIndexChanged += (s, e) =>
-        {
-            if (_emu != null && _cmbEmuInst.SelectedIndex >= 0
-                && _emuInstances[_cmbEmuInst.SelectedIndex].Index != _emu.Instance.Index)
-            {
-                DisconnectEmulator(silent: true);
-                SetEmuStatus("实例已切换 · 请重新连接", false);
-            }
-        };
-
-        _gRec = new AppCard("录制选项") { Dock = DockStyle.Top, Height = 196 };
+        _gRec = new AppCard("录制选项") { Dock = DockStyle.Top, Height = 168 };
         int ry = _gRec.ContentTop + 4;
-        CheckBox AddCk(string text, bool check)
+        CheckBox AddCk(string text)
         {
             var ck = new CheckBox { Text = text, AutoSize = true, Location = new Point(16, ry) };
             _gRec.Controls.Add(ck);
             ry += 30;
             return ck;
         }
-        _ckKeys = AddCk("记录键盘输入（按键 / 组合键）", true);
-        _ckClicks = AddCk("记录鼠标点击（左/右/中/侧键）", true);
-        _ckWheel = AddCk("记录滚轮", true);
-        _ckDrags = AddCk("记录拖拽（按住并移动）", true);
-        _ckMoves = AddCk("记录空闲鼠标移动（事件量大）", false);
+        _ckKeys = AddCk("记录键盘输入（按键 / 组合键）");
+        _ckClicks = AddCk("记录鼠标点击（左/右/中/侧键）");
+        _ckWheel = AddCk("记录滚轮（页面滚动）");
+        _ckDrags = AddCk("记录拖拽（按住并移动）");
 
-        _gPlay = new AppCard("执行设置") { Dock = DockStyle.Top, Height = 336, Padding = new Padding(10, 6, 10, 6) };
+        _gPlay = new AppCard("执行设置") { Dock = DockStyle.Top, Height = 308, Padding = new Padding(10, 6, 10, 6) };
         int py = _gPlay.ContentTop + 4;
         Control Row(string label, Control c, int width)
         {
@@ -205,7 +221,8 @@ internal sealed class MainForm : Form
         _cmbMode = (ComboBox)Row("执行模式:", new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Items = { "执行一次", "执行指定次数", "无限循环" }
+            Items = { "执行一次", "执行指定次数", "无限循环" },
+            IntegralHeight = false
         }, 160);
         _cmbMode.SelectedIndex = 0;
 
@@ -221,7 +238,8 @@ internal sealed class MainForm : Form
         _cmbSpeed = (ComboBox)Row("播放速度:", new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Items = { "0.25x", "0.5x", "1x", "2x", "4x", "8x" }
+            Items = { "0.25x", "0.5x", "1x", "2x", "4x", "8x" },
+            IntegralHeight = false
         }, 90);
         _cmbSpeed.SelectedIndex = 2;
         _numCountdown = (NumericUpDown)Row("播放前倒计时(秒):", new NumericUpDown
@@ -239,17 +257,15 @@ internal sealed class MainForm : Form
         py += 36;
         var hint = new Label
         {
-            Text = "提示：每行的“间隔”表示执行该行之前\n等待的时间；回放时该时间会除以播放速度。",
+            Text = "提示：每行的“间隔”表示执行该行之前等待的\n时间；回放时该时间会除以播放速度。",
             AutoSize = true,
             Tag = "sub",
             Location = new Point(16, py + 5)
         };
         _gPlay.Controls.Add(hint);
 
-        // 先加入的 Dock.Fill/靠下，后加入的依次靠上：gEmu 最上，gRec 居中，gPlay 靠下
         right.Controls.Add(_gPlay);
         right.Controls.Add(_gRec);
-        right.Controls.Add(gEmu);
 
         // ---------- 状态栏 ----------
         var status = new StatusStrip();
@@ -261,8 +277,8 @@ internal sealed class MainForm : Form
         status.BackColor = UiTheme.C.Panel;
         status.SizingGrip = false;
 
-        // Fill 控件先加入，再依次加入边缘停靠控件
-        Controls.Add(_lv);
+        // Fill 先加入，再依次加入边缘停靠控件
+        Controls.Add(_tabs);
         Controls.Add(right);
         Controls.Add(toolbar);
         Controls.Add(status);
@@ -270,9 +286,12 @@ internal sealed class MainForm : Form
         // ---------- 事件绑定 ----------
         _recorder.EventRecorded += ev =>
         {
-            _lv.Items.Add(MakeItem(ev, MacroEvents.Count - 1));
-            _lblCount.Text = $"事件 {MacroEvents.Count}";
+            ActiveEvents.Add(ev);
+            var lv = ActiveList;
+            lv.Items.Add(MakeItem(ev, ActiveEvents.Count - 1));
+            _lblCount.Text = $"事件 {ActiveEvents.Count}";
         };
+        _recorder.Warn += msg => Ui(() => SetStatus("⚠ " + msg, StatusKind.Warn));
 
         _player.Status += s => Ui(() => SetStatus(s, s.StartsWith("⚠") ? StatusKind.Warn : StatusKind.Good));
         _player.AbortedByFailSafe += () => { _failSafeTriggered = true; };
@@ -294,17 +313,69 @@ internal sealed class MainForm : Form
         _btnPlay.Click += (s, e) => StartPlayback();
         _btnPause.Click += (s, e) => TogglePause();
         _btnStopPlay.Click += (s, e) => StopAll();
-        _btnClear.Click += (s, e) => ClearAll();
         _btnSave.Click += (s, e) => SaveMacro();
-        _btnLoad.Click += (s, e) => LoadMacro();
+        _btnDelete.Click += (s, e) => DeleteMacro();
         _btnTheme.Click += (s, e) => UiTheme.SetDark(!UiTheme.Dark);
 
         UiTheme.Changed += OnThemeChanged;
         UiTheme.Apply(this);
+        MacroStore.EnsureMigrated();
         RefreshStatus();
         LoadSettings();
+        LoadSettingsToUI(MacroTarget.Windows);
+        RefreshMacroCombo();
+        DiscoverDevices(); // 后台预检测，进入模拟器页即可选择
         SetState(AppState.Idle);
         RebuildList();
+    }
+
+    // ================= 页面 / 数据路由 =================
+
+    private MacroTarget Target => _tabs.SelectedIndex == 1 ? MacroTarget.Emulator : MacroTarget.Windows;
+
+    private List<MacroEvent> ActiveEvents => Target == MacroTarget.Emulator ? _emuEvents : _winEvents;
+
+    private AppListView ActiveList => Target == MacroTarget.Emulator ? _lvEmu : _lvWin;
+
+    private MacroStore.TargetSettings CurSettings => Target == MacroTarget.Emulator ? _emuSettings : _winSettings;
+
+    private AppListView MkList()
+    {
+        var lv = new AppListView
+        {
+            Dock = DockStyle.Fill,
+            View = View.Details,
+            FullRowSelect = true,
+            HideSelection = false,
+            MultiSelect = true
+        };
+        lv.Columns.Add("#", 46);
+        lv.Columns.Add("操作", 240);
+        lv.Columns.Add("间隔(秒)", 90);
+        lv.Columns.Add("参数", 230);
+        lv.Columns[3].Width = -2;
+        UiTheme.StyleList(lv);
+        lv.ContextMenuStrip = BuildMenu();
+        lv.DoubleClick += (s, e) => EditSelected();
+        lv.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Delete) { DeleteSelected(); e.Handled = true; }
+        };
+        return lv;
+    }
+
+    private void OnTabChanged()
+    {
+        if (_state == AppState.Recording) StopRecording(false);
+        SnapshotSettingsTo(_curTarget);
+        _curTarget = Target;
+        LoadSettingsToUI(Target);
+        RefreshMacroCombo();
+        _emuStrip.Visible = Target == MacroTarget.Emulator;
+        RebuildList();
+        UpdateDeviceButtons();
+        if (Target == MacroTarget.Emulator && _emu != null)
+            SetDeviceStatus("已连接 " + _emu.Describe(), true);
     }
 
     private void OnThemeChanged()
@@ -312,8 +383,9 @@ internal sealed class MainForm : Form
         UiTheme.Apply(this);
         if (_menu != null) UiTheme.StyleMenu(_menu);
         _toolbar.BackColor = UiTheme.C.Panel;
+        _emuStrip.BackColor = UiTheme.C.Panel;
         _btnTheme.Text = UiTheme.Dark ? "☀ 浅色" : "🌙 深色";
-        SetEmuStatus(_lblEmuStatus.Text, _emuStatusGood);
+        if (_emu != null) SetDeviceStatus("已连接 " + _emu.Describe(), true);
         RefreshStatus();
     }
 
@@ -368,25 +440,23 @@ internal sealed class MainForm : Form
     {
         _state = s;
         var idle = s == AppState.Idle;
-        _btnRecord.Enabled = idle;
+        _btnRecord.Enabled = idle && (Target != MacroTarget.Emulator || (_emu != null && _emu.IsReady));
         _btnStopRec.Enabled = s == AppState.Recording;
-        _btnPlay.Enabled = idle;
+        _btnPlay.Enabled = idle && !(Target == MacroTarget.Emulator && _emu == null);
         _btnPause.Enabled = s is AppState.Playing or AppState.Paused;
         _btnPause.Text = s == AppState.Paused ? "⏵ 继续" : "⏸ 暂停";
         _btnPause.Variant = s == AppState.Paused ? AppVariant.Success : AppVariant.Neutral;
         _btnStopPlay.Enabled = s is AppState.Playing or AppState.Paused or AppState.Recording;
         _btnSave.Enabled = idle;
-        _btnLoad.Enabled = idle;
-        _btnClear.Enabled = idle;
+        _btnDelete.Enabled = idle;
         _gRec.Enabled = idle;
         _gPlay.Enabled = idle;
         _numCount.Enabled = idle && _cmbMode.SelectedIndex == 1;
-        _txtName.Enabled = idle;
-        UpdateEmuButtons();
+        _cmbMacro.Enabled = idle;
+        UpdateDeviceButtons();
         if (idle)
         {
-            _lblCount.Text = $"事件 {MacroEvents.Count}";
-            if (_lblStatus.Text is "就绪" or "" or "● 录制中…（按 F7 或点击“停止录制”结束）") SetStatus("就绪", StatusKind.Info);
+            _lblCount.Text = $"事件 {ActiveEvents.Count}";
         }
     }
 
@@ -395,23 +465,36 @@ internal sealed class MainForm : Form
     private void StartRecording()
     {
         if (_state is AppState.Recording or AppState.Playing or AppState.Paused) return;
-        if (MacroEvents.Count > 0 &&
+        if (ActiveEvents.Count > 0 &&
             MessageBox.Show("开始新录制会清空当前事件列表，继续吗？", "确认",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             return;
-
-        MacroEvents.Clear();
-        RebuildList();
-        _recorder.OwnWindow = Handle;
 
         var opts = new RecordOptions
         {
             RecordKeyboard = _ckKeys.Checked,
             RecordMouseClicks = _ckClicks.Checked,
             RecordWheel = _ckWheel.Checked,
-            RecordDrags = _ckDrags.Checked,
-            RecordMouseMove = _ckMoves.Checked
+            RecordDrags = _ckDrags.Checked
         };
+        if (Target == MacroTarget.Emulator)
+        {
+            if (_emu == null || !_emu.IsReady)
+            {
+                _emu?.RefreshInstance();
+                if (_emu == null || !_emu.IsReady)
+                {
+                    SetStatus("请先在上方连接模拟器，再开始录制", StatusKind.Bad);
+                    return;
+                }
+            }
+            opts.EmulatorMode = true;
+            opts.Session = _emu;
+        }
+
+        ActiveEvents.Clear();
+        RebuildList();
+        _recorder.OwnWindow = Handle;
         try { _recorder.Start(opts); }
         catch (Exception ex)
         {
@@ -419,15 +502,17 @@ internal sealed class MainForm : Form
             return;
         }
         SetState(AppState.Recording);
-        SetStatus("● 录制中…（按 F7 或点击“停止录制”结束）", StatusKind.Bad);
+        SetStatus(Target == MacroTarget.Emulator
+            ? "● 模拟器录制中… 在模拟器窗口内点击/滑动/滚动即可（按 F7 结束）"
+            : "● 录制中…（按 F7 或点击“停止录制”结束）", StatusKind.Bad);
     }
 
     private void StopRecording(bool notify)
     {
-        if (_state != AppState.Recording) return;
+        if (!_recorder.IsRecording) return;
         _recorder.Stop();
         SetState(AppState.Idle);
-        SetStatus(notify ? $"✔ 录制完成，共 {MacroEvents.Count} 个事件" : "■ 录制已停止", StatusKind.Info);
+        SetStatus(notify ? $"✔ 录制完成，共 {ActiveEvents.Count} 个事件" : "■ 录制已停止", StatusKind.Info);
     }
 
     // ================= 执行 =================
@@ -435,30 +520,37 @@ internal sealed class MainForm : Form
     private void StartPlayback()
     {
         if (_state is AppState.Playing or AppState.Paused or AppState.Recording) return;
-        if (MacroEvents.Count == 0)
+        if (ActiveEvents.Count == 0)
         {
-            SetStatus("没有可执行的事件，请先录制或打开宏文件", StatusKind.Bad);
+            SetStatus("没有可执行的事件，请先录制或从「宏」下拉选择", StatusKind.Bad);
             return;
         }
+        if (Target == MacroTarget.Emulator && (_emu == null || !_emu.IsReady))
+        {
+            SetStatus("请先连接模拟器，再执行", StatusKind.Bad);
+            return;
+        }
+
+        SnapshotSettingsTo(Target);
         double speed = 1.0;
         var speedText = _cmbSpeed.Text.TrimEnd('x', 'X', ' ');
         if (double.TryParse(speedText, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v > 0) speed = v;
 
+        var s = CurSettings;
         var settings = new PlaySettings
         {
-            Mode = (LoopMode)_cmbMode.SelectedIndex,
-            Count = (int)_numCount.Value,
-            LoopInterval = (double)_numInterval.Value,
+            Mode = (LoopMode)s.LoopMode,
+            Count = s.LoopCount,
+            LoopInterval = s.LoopInterval,
             Speed = speed,
-            CountdownSeconds = (int)_numCountdown.Value,
-            FailSafe = _ckFailsafe.Checked,
-            UseEmulator = _ckEmu.Checked
+            CountdownSeconds = s.Countdown,
+            FailSafe = _ckFailsafe.Checked
         };
         _failSafeTriggered = false;
-        var snapshot = new List<MacroEvent>(MacroEvents);
+        var snapshot = new List<MacroEvent>(ActiveEvents);
         SetState(AppState.Playing);
-        SetStatus(_ckEmu.Checked && _emu != null ? "▶ 开始执行（模拟器模式）…" : "▶ 开始执行…", StatusKind.Good);
-        _player.Start(snapshot, settings, _emu);
+        SetStatus(Target == MacroTarget.Emulator ? "▶ 开始执行（模拟器 · 不占鼠标）…" : "▶ 开始执行…", StatusKind.Good);
+        _player.Start(snapshot, settings, Target == MacroTarget.Emulator ? _emu : null);
     }
 
     private void TogglePause()
@@ -480,13 +572,13 @@ internal sealed class MainForm : Form
 
     private void StopAll()
     {
-        if (_state == AppState.Recording) StopRecording(false);
-        if (_state is AppState.Playing or AppState.Paused) _player.Stop();
+        if (_recorder.IsRecording) StopRecording(false);
+        if (_state is AppState.Playing or AppState.Paused || _player.IsBusy) _player.Stop();
     }
 
     // ================= 列表操作 =================
 
-    private ListViewItem MakeItem(MacroEvent e, int idx)
+    private static ListViewItem MakeItem(MacroEvent e, int idx)
     {
         var it = new ListViewItem((idx + 1).ToString()) { Tag = e };
         it.SubItems.Add(e.Display);
@@ -497,27 +589,32 @@ internal sealed class MainForm : Form
 
     private void RebuildList()
     {
-        _lv.BeginUpdate();
-        _lv.Items.Clear();
-        for (int i = 0; i < MacroEvents.Count; i++) _lv.Items.Add(MakeItem(MacroEvents[i], i));
-        _lv.EndUpdate();
-        _lblCount.Text = $"事件 {MacroEvents.Count}";
+        var lv = ActiveList;
+        var events = ActiveEvents;
+        lv.BeginUpdate();
+        lv.Items.Clear();
+        for (int i = 0; i < events.Count; i++) lv.Items.Add(MakeItem(events[i], i));
+        lv.EndUpdate();
+        _lblCount.Text = $"事件 {events.Count}";
     }
 
     private void SelectIndex(int i)
     {
-        if (i >= 0 && i < _lv.Items.Count)
+        var lv = ActiveList;
+        if (i >= 0 && i < lv.Items.Count)
         {
-            _lv.Items[i].Selected = true;
-            _lv.Items[i].EnsureVisible();
+            lv.Items[i].Selected = true;
+            lv.Items[i].EnsureVisible();
         }
     }
 
     private void EditSelected()
     {
-        if (_state != AppState.Idle || _lv.SelectedIndices.Count != 1) return;
-        int i = _lv.SelectedIndices[0];
-        using var dlg = new EventEditForm(MacroEvents[i]);
+        if (_state != AppState.Idle) return;
+        var lv = ActiveList;
+        if (lv.SelectedIndices.Count != 1) return;
+        int i = lv.SelectedIndices[0];
+        using var dlg = new EventEditForm(ActiveEvents[i]);
         if (dlg.ShowDialog(this) == DialogResult.OK)
         {
             RebuildList();
@@ -527,28 +624,34 @@ internal sealed class MainForm : Form
 
     private void DeleteSelected()
     {
-        if (_state != AppState.Idle || _lv.SelectedIndices.Count == 0) return;
-        foreach (int i in _lv.SelectedIndices.Cast<int>().OrderByDescending(x => x))
-            MacroEvents.RemoveAt(i);
+        if (_state != AppState.Idle) return;
+        var lv = ActiveList;
+        if (lv.SelectedIndices.Count == 0) return;
+        foreach (int i in lv.SelectedIndices.Cast<int>().OrderByDescending(x => x))
+            ActiveEvents.RemoveAt(i);
         RebuildList();
     }
 
     private void MoveSelected(int delta)
     {
-        if (_state != AppState.Idle || _lv.SelectedIndices.Count != 1) return;
-        int i = _lv.SelectedIndices[0];
+        if (_state != AppState.Idle) return;
+        var lv = ActiveList;
+        if (lv.SelectedIndices.Count != 1) return;
+        int i = lv.SelectedIndices[0];
         int j = i + delta;
-        if (j < 0 || j >= MacroEvents.Count) return;
-        (MacroEvents[i], MacroEvents[j]) = (MacroEvents[j], MacroEvents[i]);
+        if (j < 0 || j >= ActiveEvents.Count) return;
+        (ActiveEvents[i], ActiveEvents[j]) = (ActiveEvents[j], ActiveEvents[i]);
         RebuildList();
         SelectIndex(j);
     }
 
     private void CopySelected()
     {
-        if (_state != AppState.Idle || _lv.SelectedIndices.Count != 1) return;
-        int i = _lv.SelectedIndices[0];
-        MacroEvents.Insert(i + 1, MacroEvents[i].Clone());
+        if (_state != AppState.Idle) return;
+        var lv = ActiveList;
+        if (lv.SelectedIndices.Count != 1) return;
+        int i = lv.SelectedIndices[0];
+        ActiveEvents.Insert(i + 1, ActiveEvents[i].Clone());
         RebuildList();
         SelectIndex(i + 1);
     }
@@ -556,11 +659,27 @@ internal sealed class MainForm : Form
     private void InsertEvent(MacroEvent ev)
     {
         if (_state != AppState.Idle) return;
-        int i = _lv.SelectedIndices.Count == 1 ? _lv.SelectedIndices[0] + 1 : MacroEvents.Count;
+        var lv = ActiveList;
+        int i = lv.SelectedIndices.Count == 1 ? lv.SelectedIndices[0] + 1 : ActiveEvents.Count;
+        if (ev.Type == EventType.MouseClick && Target == MacroTarget.Emulator)
+        {
+            ev.CoordSpace = "device";
+            if (_emu != null) { ev.X = _emu.Device.Width / 2; ev.Y = _emu.Device.Height / 2; }
+        }
+        if (ev.Type == EventType.Swipe && Target == MacroTarget.Emulator)
+        {
+            ev.CoordSpace = "device";
+            if (_emu != null)
+            {
+                ev.X = ev.X2 = _emu.Device.Width / 2;
+                ev.Y = _emu.Device.Height / 3;
+                ev.Y2 = _emu.Device.Height * 2 / 3;
+            }
+        }
         using var dlg = new EventEditForm(ev);
         if (dlg.ShowDialog(this) == DialogResult.OK)
         {
-            MacroEvents.Insert(i, ev);
+            ActiveEvents.Insert(i, ev);
             RebuildList();
             SelectIndex(i);
         }
@@ -576,6 +695,7 @@ internal sealed class MainForm : Form
         var down = new ToolStripMenuItem("下移");
         var copy = new ToolStripMenuItem("复制");
         var insClick = new ToolStripMenuItem("插入鼠标点击…");
+        var insSwipe = new ToolStripMenuItem("插入滑动 / 长按…");
         var insKey = new ToolStripMenuItem("插入按键…");
         var insWait = new ToolStripMenuItem("插入等待…");
 
@@ -586,9 +706,18 @@ internal sealed class MainForm : Form
         copy.Click += (s, e) => CopySelected();
         insClick.Click += (s, e) =>
         {
-            Win32.GetCursorPos(out var p);
-            InsertEvent(new MacroEvent { Type = EventType.MouseClick, X = p.X, Y = p.Y, Delay = 0 });
+            if (Target == MacroTarget.Windows)
+            {
+                Win32.GetCursorPos(out var p);
+                InsertEvent(new MacroEvent { Type = EventType.MouseClick, X = p.X, Y = p.Y, Delay = 0 });
+            }
+            else
+            {
+                InsertEvent(new MacroEvent { Type = EventType.MouseClick, CoordSpace = "device", Delay = 0 });
+            }
         };
+        insSwipe.Click += (s, e) =>
+            InsertEvent(new MacroEvent { Type = EventType.Swipe, CoordSpace = "device", DurationMs = 300, Delay = 0 });
         insKey.Click += (s, e) =>
             InsertEvent(new MacroEvent { Type = EventType.Key, Vk = 0x0D, Delay = 0 });
         insWait.Click += (s, e) =>
@@ -597,193 +726,188 @@ internal sealed class MainForm : Form
         m.Items.AddRange(new ToolStripItem[]
         {
             edit, del, new ToolStripSeparator(), up, down, copy,
-            new ToolStripSeparator(), insClick, insKey, insWait
+            new ToolStripSeparator(), insClick, insSwipe, insKey, insWait
         });
 
         m.Opening += (s, e) =>
         {
             bool idle = _state == AppState.Idle;
-            bool one = idle && _lv.SelectedIndices.Count == 1;
-            bool any = idle && _lv.SelectedIndices.Count > 0;
+            bool one = idle && ActiveList.SelectedIndices.Count == 1;
+            bool any = idle && ActiveList.SelectedIndices.Count > 0;
             edit.Enabled = one;
             del.Enabled = any;
             up.Enabled = one;
             down.Enabled = one;
             copy.Enabled = one;
             insClick.Enabled = insKey.Enabled = insWait.Enabled = idle;
+            insSwipe.Visible = Target == MacroTarget.Emulator;
+            insSwipe.Enabled = idle;
+            insClick.Text = Target == MacroTarget.Emulator ? "插入点击(设备)…" : "插入鼠标点击…";
         };
         UiTheme.StyleMenu(m);
         return m;
     }
 
-    // ================= 模拟器（MuMu / ADB） =================
+    // ================= 模拟器（ADB） =================
 
-    private bool _emuStatusGood;
-
-    private void SetEmuStatus(string text, bool good)
+    private void SetDeviceStatus(string text, bool good)
     {
-        _emuStatusGood = good;
-        _lblEmuStatus.Text = text;
-        _lblEmuStatus.ForeColor = good ? UiTheme.C.Success : UiTheme.C.SubText;
+        _lblDevice.Text = text;
+        _lblDevice.ForeColor = good ? UiTheme.C.Success : UiTheme.C.SubText;
     }
 
-    /// <summary>搜索 MuMuManager → 解析实例 → 连接选中（或首个运行中的）实例。</summary>
-    private void ConnectEmulator()
+    /// <summary>后台发现 adb 与在线设备，填充下拉。</summary>
+    private void DiscoverDevices()
     {
-        SetEmuStatus("正在定位 MuMu 模拟器…", false);
-        _emuManagerPath = MuMuLocator.FindManagerPath();
-        if (_emuManagerPath == null)
+        if (_discovering) return;
+        _discovering = true;
+        _btnRefresh.Enabled = false;
+        SetDeviceStatus("正在检测 adb 与模拟器…", false);
+        Task.Run(() =>
         {
-            SetEmuStatus("未找到 MuMuManager.exe：请确认已安装 MuMu 模拟器 12（V4.0.0+）", false);
-            return;
-        }
-
-        var adbPath = MuMuLocator.FindAdbNearManager(_emuManagerPath);
-        if (adbPath == null)
-        {
-            SetEmuStatus("未在 MuMu 目录找到 adb.exe：" + Path.GetDirectoryName(_emuManagerPath), false);
-            return;
-        }
-        _adb = new AdbClient(adbPath);
-
-        var (instances, err) = MuMuLocator.QueryInstances(_emuManagerPath);
-        if (instances.Count == 0)
-        {
-            SetEmuStatus(err, false);
-            return;
-        }
-        _emuInstances = instances;
-        _cmbEmuInst.Items.Clear();
-        foreach (var it in instances)
-            _cmbEmuInst.Items.Add($"实例 {it.Index} · {(it.Running ? $"端口 {it.Port}" : "未启动")}");
-        var prefer = _cmbEmuInst.SelectedIndex < 0
-            ? Math.Clamp(_pendingEmuIndex, 0, instances.Count - 1)
-            : _cmbEmuInst.SelectedIndex;
-        if (!instances[prefer].Running)
-            prefer = instances.FindIndex(i => i.Running);
-        _cmbEmuInst.SelectedIndex = prefer >= 0 ? prefer : 0;
-
-        var inst = instances[_cmbEmuInst.SelectedIndex];
-        if (!inst.Running)
-        {
-            SetEmuStatus($"实例 {inst.Index} 未启动，请先启动模拟器再连接", false);
-            return;
-        }
-
-        SetEmuStatus($"正在连接 {inst.Serial} …", false);
-        var session = new EmulatorSession(_adb, inst, () => MuMuLocator.QueryInstances(_emuManagerPath!).Instances);
-        var error = session.Connect();
-        if (error.Length > 0)
-        {
-            SetEmuStatus($"连接 {inst.Serial} 失败：{error}", false);
-            return;
-        }
-        _emu = session;
-        _pendingEmuIndex = inst.Index;
-        SetEmuStatus("已连接 " + session.Describe(), true);
-        UpdateEmuButtons();
+            var (adb, devices, error) = EmulatorScanner.Discover();
+            Ui(() =>
+            {
+                _discovering = false;
+                _btnRefresh.Enabled = true;
+                _adb = adb;
+                _emuCandidates = devices;
+                _mumuRequery = devices.FirstOrDefault()?.MumuRequery;
+                _cmbDevice.Items.Clear();
+                foreach (var d in devices)
+                    _cmbDevice.Items.Add(d.Display);
+                if (_emu != null)
+                {
+                    SetDeviceStatus(_emu.IsReady ? "已连接 " + _emu.Describe() : "设备似乎已离线，请重新连接", _emu.IsReady);
+                }
+                else if (devices.Count > 0)
+                {
+                    // 恢复上次选择的 serial
+                    int sel = -1;
+                    if (!string.IsNullOrEmpty(_settingsEmuSerial))
+                        sel = devices.FindIndex(d => d.Serial == _settingsEmuSerial);
+                    if (sel < 0) sel = 0;
+                    _cmbDevice.SelectedIndex = sel;
+                    SetDeviceStatus($"检测到 {devices.Count} 台设备 · 点「连接」", false);
+                }
+                else
+                {
+                    SetDeviceStatus(error, false);
+                }
+                UpdateDeviceButtons();
+                SetState(_state); // 刷新录制按钮可用性
+            });
+        });
     }
 
-    private int _pendingEmuIndex;
+    private string? _settingsEmuSerial;
 
-    private void DisconnectEmulator(bool silent = false)
+    /// <summary>连接下拉选择（或手动输入）的设备。</summary>
+    private void ConnectDevice()
+    {
+        if (_adb == null)
+        {
+            SetDeviceStatus("尚未检测到 adb，先点「检测设备」", false);
+            DiscoverDevices();
+            return;
+        }
+        var text = _cmbDevice.Text.Trim();
+        if (text.Length == 0)
+        {
+            SetDeviceStatus("请先选择或输入设备（如 127.0.0.1:5555）", false);
+            return;
+        }
+        string serial = text;
+        var candidate = _emuCandidates.FirstOrDefault(c => c.Display == text);
+        if (candidate != null)
+        {
+            serial = candidate.Serial;
+        }
+        else if (text.Contains('·'))
+        {
+            serial = text.Split('·')[1].Trim(); // 显示文本形如 "家族 · 127.0.0.1:16384 · 分辨率"
+        }
+        else if (int.TryParse(text, out int port))
+        {
+            serial = $"127.0.0.1:{port}";
+        }
+
+        SetDeviceStatus($"正在连接 {serial} …", false);
+        var family = candidate?.Family ?? "自定义设备";
+        var mumu = candidate?.Mumu;
+        var requery = _mumuRequery;
+        Task.Run(() =>
+        {
+            var session = new EmulatorSession(_adb!, serial, family, mumu, requery);
+            var error = session.Connect();
+            Ui(() =>
+            {
+                if (error.Length > 0)
+                {
+                    SetDeviceStatus($"连接 {serial} 失败：{error}", false);
+                    return;
+                }
+                _emu = session;
+                _settingsEmuSerial = serial;
+                SetDeviceStatus("已连接 " + session.Describe(), true);
+                UpdateDeviceButtons();
+                SetState(_state);
+            });
+        });
+    }
+
+    private void DisconnectDevice()
     {
         _emu = null;
-        if (!silent) SetEmuStatus("已断开连接", false);
-        UpdateEmuButtons();
+        SetDeviceStatus("已断开连接", false);
+        UpdateDeviceButtons();
+        SetState(_state);
     }
 
-    private void UpdateEmuButtons()
+    private void UpdateDeviceButtons()
     {
         var idle = _state == AppState.Idle;
-        _btnEmuConnect.Enabled = idle && _emu == null;
-        _btnEmuDisconnect.Enabled = idle && _emu != null;
-        _btnEmuShot.Enabled = idle && _emu != null;
-        _cmbEmuInst.Enabled = idle;
+        _btnConnect.Enabled = idle && _adb != null;
+        _btnDisconnect.Enabled = idle && _emu != null;
+        _cmbDevice.Enabled = idle;
+        _btnRefresh.Enabled = idle && !_discovering;
     }
 
-    /// <summary>截取模拟器画面，点选生成 device 坐标事件（不受窗口位置/缩放影响）。</summary>
-    private void PickFromScreenshot()
+    // ================= 宏下拉 / 保存 / 删除 =================
+
+    private void RefreshMacroCombo()
     {
-        if (_state != AppState.Idle) return;
-        if (_emu == null || !_emu.IsReady)
-        {
-            SetEmuStatus("请先连接模拟器", false);
-            return;
-        }
-        SetEmuStatus("正在截取模拟器画面…", false);
-        var shot = _emu.Capture();
-        if (shot == null)
-        {
-            SetEmuStatus("截图失败（模拟器可能正忙，请重试）", false);
-            return;
-        }
-        SetEmuStatus("已连接 " + _emu.Describe(), true);
-        using var dlg = new EmuShotDialog(shot, _emu.Describe());
-        var picked = dlg.ShowDialog(this) == DialogResult.OK ? dlg.Picked.Count : 0;
-        shot.Dispose();
-        if (picked > 0)
-        {
-            MacroEvents.AddRange(dlg.Picked);
-            RebuildList();
-            SetStatus($"✔ 已从截图添加 {picked} 个模拟器点击", StatusKind.Good);
-        }
+        _loadingMacro = true;
+        _cmbMacro.Items.Clear();
+        foreach (var (name, _) in MacroStore.ListMacros(Target))
+            _cmbMacro.Items.Add(name);
+        _cmbMacro.Text = "";
+        _cmbMacro.SelectedIndex = -1;
+        _loadingMacro = false;
     }
 
+    private bool _loadingMacro;
 
-    // ================= 保存 / 打开 =================
-
-    private void SaveMacro()
+    private void OnMacroSelected()
     {
-        if (_state != AppState.Idle) return;
-        if (MacroEvents.Count == 0)
+        if (_loadingMacro || _cmbMacro.SelectedIndex < 0) return;
+        string name = _cmbMacro.Text;
+        var path = MacroStore.PathOf(Target, name);
+        if (!File.Exists(path)) return;
+        if (ActiveEvents.Count > 0 &&
+            MessageBox.Show($"加载宏「{name}」会替换当前 {ActiveEvents.Count} 个事件，继续吗？", "确认",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
         {
-            MessageBox.Show("没有事件可保存。");
+            RefreshMacroCombo();
             return;
         }
-        Directory.CreateDirectory(MacroStore.MacrosDir);
-        var defaultName = _txtName.Text.Trim().Length > 0 ? _txtName.Text.Trim() : "macro";
-        using var dlg = new SaveFileDialog
-        {
-            Title = "保存宏",
-            Filter = "宏文件 (*.json)|*.json",
-            InitialDirectory = MacroStore.MacrosDir,
-            FileName = defaultName + ".json",
-            OverwritePrompt = true
-        };
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
         try
         {
-            var name = Path.GetFileNameWithoutExtension(dlg.FileName);
-            MacroStore.Save(dlg.FileName, name, MacroEvents);
-            _txtName.Text = name;
-            SetStatus($"✔ 已保存 {MacroEvents.Count} 个事件 → {dlg.FileName}", StatusKind.Info);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show("保存失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
-
-    private void LoadMacro()
-    {
-        if (_state != AppState.Idle) return;
-        Directory.CreateDirectory(MacroStore.MacrosDir);
-        using var dlg = new OpenFileDialog
-        {
-            Title = "打开宏",
-            Filter = "宏文件 (*.json)|*.json|所有文件 (*.*)|*.*",
-            InitialDirectory = MacroStore.MacrosDir
-        };
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
-        try
-        {
-            var (name, list) = MacroStore.Load(dlg.FileName);
-            MacroEvents.Clear();
-            MacroEvents.AddRange(list);
-            _txtName.Text = name;
+            var (macroName, list) = MacroStore.Load(path);
+            ActiveEvents.Clear();
+            ActiveEvents.AddRange(list);
             RebuildList();
-            SetStatus($"✔ 已加载 {list.Count} 个事件", StatusKind.Info);
+            SetStatus($"✔ 已加载宏「{macroName}」· {list.Count} 个事件", StatusKind.Good);
         }
         catch (Exception ex)
         {
@@ -791,38 +915,111 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void ClearAll()
+    /// <summary>下拉框输入时联想已有宏名（不强制），回车可加载。</summary>
+    private void AutoCompleteMacroName()
     {
-        if (_state != AppState.Idle || MacroEvents.Count == 0) return;
-        if (MessageBox.Show("确定清空全部事件？", "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-        MacroEvents.Clear();
-        RebuildList();
+        var text = _cmbMacro.Text;
+        if (text.Length == 0) return;
+        var hit = _cmbMacro.Items.Cast<string>()
+            .FirstOrDefault(n => n.StartsWith(text, StringComparison.OrdinalIgnoreCase));
+        if (hit == null || hit == text) return;
+        int start = text.Length;
+        _cmbMacro.Text = hit;
+        _cmbMacro.SelectionStart = start;
+        _cmbMacro.SelectionLength = hit.Length - start;
+    }
+
+    private void SaveMacro()
+    {
+        if (_state != AppState.Idle) return;
+        var name = _cmbMacro.Text.Trim();
+        if (name.Length == 0)
+        {
+            MessageBox.Show("请先在「宏」下拉框中输入或选择一个名称。", "提示");
+            _cmbMacro.Focus();
+            return;
+        }
+        if (ActiveEvents.Count == 0)
+        {
+            MessageBox.Show("没有事件可保存。");
+            return;
+        }
+        try
+        {
+            var path = MacroStore.PathOf(Target, name);
+            MacroStore.Save(path, name, Target, ActiveEvents);
+            RefreshMacroCombo();
+            _cmbMacro.Text = name;
+            SetStatus($"✔ 已保存 {ActiveEvents.Count} 个事件 → 宏「{name}」", StatusKind.Good);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("保存失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void DeleteMacro()
+    {
+        if (_state != AppState.Idle) return;
+        var name = _cmbMacro.Text.Trim();
+        var path = MacroStore.PathOf(Target, name);
+        if (name.Length == 0 || !File.Exists(path))
+        {
+            SetStatus("当前名称不是已保存的宏", StatusKind.Warn);
+            return;
+        }
+        if (MessageBox.Show($"确定删除宏「{name}」？", "确认",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        MacroStore.DeleteMacro(path);
+        RefreshMacroCombo();
+        SetStatus($"已删除宏「{name}」", StatusKind.Info);
     }
 
     // ================= 设置持久化 =================
+
+    private void SnapshotSettingsTo(MacroTarget target)
+    {
+        var s = target == MacroTarget.Emulator ? _emuSettings : _winSettings;
+        s.LoopMode = _cmbMode.SelectedIndex;
+        s.LoopCount = (int)_numCount.Value;
+        s.LoopInterval = (double)_numInterval.Value;
+        s.Speed = _cmbSpeed.Text;
+        s.Countdown = (int)_numCountdown.Value;
+        s.FailSafe = _ckFailsafe.Checked;
+        s.RecKeys = _ckKeys.Checked;
+        s.RecClicks = _ckClicks.Checked;
+        s.RecWheel = _ckWheel.Checked;
+        s.RecDrags = _ckDrags.Checked;
+    }
+
+    private void LoadSettingsToUI(MacroTarget target)
+    {
+        var s = target == MacroTarget.Emulator ? _emuSettings : _winSettings;
+        _cmbMode.SelectedIndex = Math.Clamp(s.LoopMode, 0, 2);
+        _numCount.Value = Math.Clamp(s.LoopCount, 1, 999999);
+        _numInterval.Value = (decimal)Math.Clamp(s.LoopInterval, 0.0, 3600.0);
+        var si = _cmbSpeed.Items.IndexOf(s.Speed ?? "1x");
+        _cmbSpeed.SelectedIndex = si >= 0 ? si : 2;
+        _numCountdown.Value = Math.Clamp(s.Countdown, 0, 10);
+        _ckFailsafe.Checked = s.FailSafe;
+        _ckKeys.Checked = s.RecKeys;
+        _ckClicks.Checked = s.RecClicks;
+        _ckWheel.Checked = s.RecWheel;
+        _ckDrags.Checked = s.RecDrags;
+        _numCount.Enabled = _cmbMode.SelectedIndex == 1;
+    }
 
     private void SaveSettings()
     {
         try
         {
+            SnapshotSettingsTo(Target);
             var dto = new MacroStore.AppSettings
             {
-                LoopMode = _cmbMode.SelectedIndex,
-                LoopCount = (int)_numCount.Value,
-                LoopInterval = (double)_numInterval.Value,
-                Speed = _cmbSpeed.Text,
-                Countdown = (int)_numCountdown.Value,
-                FailSafe = _ckFailsafe.Checked,
-                RecKeys = _ckKeys.Checked,
-                RecClicks = _ckClicks.Checked,
-                RecWheel = _ckWheel.Checked,
-                RecDrags = _ckDrags.Checked,
-                RecMoves = _ckMoves.Checked,
-                LastName = _txtName.Text,
                 Theme = UiTheme.Dark ? "dark" : "light",
-                EmuExec = _ckEmu.Checked,
-                EmuIndex = _pendingEmuIndex,
-                EmuManagerPath = _emuManagerPath,
+                Win = _winSettings,
+                Emu = _emuSettings,
+                EmuSerial = _settingsEmuSerial,
                 WinW = WindowState == FormWindowState.Normal ? Size.Width : RestoreBounds.Width,
                 WinH = WindowState == FormWindowState.Normal ? Size.Height : RestoreBounds.Height,
                 WinMax = WindowState == FormWindowState.Maximized
@@ -842,28 +1039,38 @@ internal sealed class MainForm : Form
             if (!File.Exists(p)) return;
             var dto = JsonSerializer.Deserialize<MacroStore.AppSettings>(File.ReadAllText(p), MacroStore.JsonOpts);
             if (dto == null) return;
-            _cmbMode.SelectedIndex = Math.Clamp(dto.LoopMode, 0, 2);
-            _numCount.Value = Math.Clamp(dto.LoopCount, 1, 999999);
-            _numInterval.Value = (decimal)Math.Clamp(dto.LoopInterval, 0.0, 3600.0);
-            var si = _cmbSpeed.Items.IndexOf(dto.Speed ?? "1x");
-            if (si >= 0) _cmbSpeed.SelectedIndex = si;
-            _numCountdown.Value = Math.Clamp(dto.Countdown, 0, 10);
-            _ckFailsafe.Checked = dto.FailSafe;
-            _ckKeys.Checked = dto.RecKeys;
-            _ckClicks.Checked = dto.RecClicks;
-            _ckWheel.Checked = dto.RecWheel;
-            _ckDrags.Checked = dto.RecDrags;
-            _ckMoves.Checked = dto.RecMoves;
-            if (!string.IsNullOrEmpty(dto.LastName)) _txtName.Text = dto.LastName;
-            _ckEmu.Checked = dto.EmuExec;
-            _pendingEmuIndex = Math.Max(0, dto.EmuIndex);
-            if (!string.IsNullOrEmpty(dto.EmuManagerPath)) _emuManagerPath = dto.EmuManagerPath;
+            if (dto.Win != null) _winSettings = dto.Win;
+            if (dto.Emu != null) _emuSettings = dto.Emu;
+            _settingsEmuSerial = dto.EmuSerial;
+            if (dto.Win == null) LoadLegacySettings(p);
             if (dto.WinW >= MinimumSize.Width && dto.WinH >= MinimumSize.Height)
             {
                 Size = new Size(Math.Min(dto.WinW, Screen.PrimaryScreen!.WorkingArea.Width),
                                 Math.Min(dto.WinH, Screen.PrimaryScreen.WorkingArea.Height));
                 if (dto.WinMax) WindowState = FormWindowState.Maximized;
             }
+        }
+        catch { }
+    }
+
+    /// <summary>旧版（单目标扁平字段）config.json → Windows 页设置迁移。</summary>
+    private void LoadLegacySettings(string path)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            var r = doc.RootElement;
+            var s = _winSettings;
+            if (r.TryGetProperty("LoopMode", out var v1)) s.LoopMode = v1.GetInt32();
+            if (r.TryGetProperty("LoopCount", out var v2)) s.LoopCount = v2.GetInt32();
+            if (r.TryGetProperty("LoopInterval", out var v3)) s.LoopInterval = v3.GetDouble();
+            if (r.TryGetProperty("Speed", out var v4) && v4.ValueKind == JsonValueKind.String) s.Speed = v4.GetString() ?? "1x";
+            if (r.TryGetProperty("Countdown", out var v5)) s.Countdown = v5.GetInt32();
+            if (r.TryGetProperty("FailSafe", out var v6)) s.FailSafe = v6.GetBoolean();
+            if (r.TryGetProperty("RecKeys", out var v7)) s.RecKeys = v7.GetBoolean();
+            if (r.TryGetProperty("RecClicks", out var v8)) s.RecClicks = v8.GetBoolean();
+            if (r.TryGetProperty("RecWheel", out var v9)) s.RecWheel = v9.GetBoolean();
+            if (r.TryGetProperty("RecDrags", out var v10)) s.RecDrags = v10.GetBoolean();
         }
         catch { }
     }
@@ -892,7 +1099,7 @@ internal sealed class MainForm : Form
             switch (m.WParam.ToInt32())
             {
                 case 1: // F6
-                    if (_state == AppState.Recording) StopRecording(true);
+                    if (_recorder.IsRecording) StopRecording(true);
                     else StartRecording();
                     break;
                 case 2: StopRecording(true); break;                       // F7

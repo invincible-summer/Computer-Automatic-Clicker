@@ -13,11 +13,10 @@ internal sealed class PlaySettings
     public double Speed = 1.0;      // 播放速度倍率，delay/speed
     public int CountdownSeconds;    // 播放前倒计时
     public bool FailSafe = true;    // 鼠标移到屏幕左上角紧急停止
-    /// <summary>模拟器模式：鼠标/按键事件经 ADB 注入模拟器，不占用本机鼠标。</summary>
-    public bool UseEmulator;
 }
 
-/// <summary>回放引擎：后台线程按 delta time 回放事件序列，支持循环、倍速、暂停与急停。</summary>
+/// <summary>回放引擎：后台线程按 delta time 回放事件序列，支持循环、倍速、暂停与急停。
+/// 注入目标由构造时是否传入模拟器会话决定（会话非空 = ADB 注入，不占用本机鼠标）。</summary>
 internal sealed class Player
 {
     private volatile bool _stop;
@@ -27,6 +26,7 @@ internal sealed class Player
     private DateTime _lastStatusUtc = DateTime.MinValue;
     private EmulatorSession? _emu;
     private readonly HashSet<string> _warned = new();
+    private bool _emuBroken;
 
     public bool IsBusy { get; private set; }
     public bool IsPaused { get; private set; }
@@ -48,14 +48,13 @@ internal sealed class Player
         if (IsBusy) return;
         _stop = false;
         _failSafeReported = false;
+        _emuBroken = false;
         StopReason = null;
         IsPaused = false;
         _run.Set();
         _lastStatusUtc = DateTime.MinValue;
-        _emu = settings.UseEmulator && emu != null && emu.IsReady ? emu : null;
+        _emu = emu;
         _warned.Clear();
-        if (settings.UseEmulator && _emu == null)
-            Status?.Invoke("⚠ 模拟器未连接，回退为本机鼠标执行");
         _thread = new Thread(() => Run(events, settings)) { IsBackground = true, Name = "MacroPlayer" };
         _thread.Start();
     }
@@ -92,6 +91,7 @@ internal sealed class Player
                     StatusThrottled($"▶ 执行中 · 第 {loop} 轮 · 事件 {i + 1}/{events.Count}");
                     if (_emu != null) ExecuteEmu(events[i]);
                     else Execute(events[i]);
+                    if (_stop || _emuBroken) { Finish(false); return; }
                 }
 
                 if (s.Mode == LoopMode.Once) break;
@@ -161,17 +161,17 @@ internal sealed class Player
         if (_warned.Add(key)) Status?.Invoke("⚠ " + msg);
     }
 
-    /// <summary>模拟器执行路径：坐标动态换算为设备像素后经 ADB 注入（不移动本机鼠标）。</summary>
+    /// <summary>模拟器执行路径：device 坐标事件经 ADB 注入（不移动本机鼠标）。</summary>
     private void ExecuteEmu(MacroEvent e)
     {
         var emu = _emu!;
-        // 窗口关闭/模拟器重启会导致坐标无法换算——此时绝不能盲点 (0,0)，先刷新句柄，仍失败则停止
         if (!emu.IsReady)
         {
-            emu.RefreshWindowHandle();
-            if (!emu.IsReady)
+            // 设备掉线（模拟器重启等）：重连一次，仍失败则停止，绝不盲点 (0,0)
+            if (!emu.TryRecover())
             {
-                StopReason = "⛔ 模拟器已断开或窗口已关闭，已停止执行";
+                StopReason = "⛔ 模拟器已断开（可能被关闭或重启），已停止执行";
+                _emuBroken = true;
                 _stop = true;
                 _run.Set();
                 Status?.Invoke(StopReason);
@@ -181,20 +181,31 @@ internal sealed class Player
 
         switch (e.Type)
         {
-            case EventType.MouseClick or EventType.MouseDown or EventType.MouseUp:
+            case EventType.MouseClick:
+            {
                 if (e.Modifiers.Count > 0)
                     WarnOnce("mods", "模拟器模式不支持 Ctrl/Shift/Alt 修饰键，已忽略");
                 var p = emu.Resolve(e);
+                if (p.X < 0) { WarnOnce("map", "事件坐标无法换算为设备坐标（窗口不可见），已跳过"); break; }
                 emu.Tap(p.X, p.Y);
                 break;
+            }
 
-            case EventType.MouseMove:
-                break; // ADB 无独立移动语义，跳过
+            case EventType.Swipe:
+                emu.Swipe(e.X, e.Y, e.X2, e.Y2, Math.Clamp(e.DurationMs, 50, 60000));
+                break;
+
+            case EventType.MouseDown or EventType.MouseUp or EventType.MouseMove:
+                WarnOnce("emuwin", "模拟器页仅回放 点击/滑动/按键 事件，本机鼠标事件已跳过");
+                break;
 
             case EventType.Wheel:
+            {
                 var w = emu.Resolve(e);
-                emu.Wheel(w.X, w.Y, e.Delta);
+                if (w.X < 0) break;
+                emu.WheelSwipe(w.X, w.Y, e.Delta);
                 break;
+            }
 
             case EventType.Key:
             {
@@ -205,20 +216,8 @@ internal sealed class Player
             }
 
             case EventType.Hotkey:
-            {
-                var keys = e.Combo.Where(k => !KeyMap.IsModifier(k)).ToList();
-                if (keys.Count == 1)
-                {
-                    var code = AndroidKeys.FromName(KeyMap.NameOf(keys[0]));
-                    if (code > 0) emu.Key(code);
-                    else WarnOnce("combo" + keys[0], $"模拟器模式暂不支持按键 {KeyMap.NameOf(keys[0])}，已跳过");
-                }
-                else
-                {
-                    WarnOnce("combo", "模拟器模式暂不支持多键组合，已跳过");
-                }
+                WarnOnce("combo", "模拟器模式暂不支持组合键，已跳过");
                 break;
-            }
 
             case EventType.Wait:
                 break;
@@ -286,8 +285,8 @@ internal sealed class Player
                 }
                 break;
 
-            case EventType.Wait:
-                break;
+            case EventType.Swipe or EventType.Wait:
+                break; // 本机目标没有滑动语义
         }
     }
 

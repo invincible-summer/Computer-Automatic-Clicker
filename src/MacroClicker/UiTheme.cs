@@ -114,6 +114,12 @@ internal static class UiTheme
                 ss.Renderer = Renderer;
                 ss.SizingGrip = false;
                 break;
+            case TabControl tc:
+                StyleTabs(tc);
+                break;
+            case TabPage tp:
+                tp.BackColor = C.Window;
+                break;
             case Form f:
                 f.BackColor = C.Window;
                 ApplyTitleBar(f);
@@ -197,6 +203,47 @@ internal static class UiTheme
                 new Point(e.Bounds.X + 2, e.Bounds.Y + (e.Bounds.Height - TextRenderer.MeasureText(text, e.Font ?? cb.Font).Height) / 2),
                 C.Text);
         };
+    }
+
+    /// <summary>TabControl 主题化：页签条用面板色，选中页签卡片色 + 强调下划线。</summary>
+    public static void StyleTabs(TabControl tc)
+    {
+        tc.Font = BaseFont;
+        tc.BackColor = C.Panel;
+        if (tc.Tag as string == "themed") { RecalcTabSize(tc); tc.Invalidate(); return; }
+        tc.Tag = "themed";
+        tc.DrawMode = TabDrawMode.OwnerDrawFixed;
+        tc.DrawItem += (s, e) =>
+        {
+            var tab = tc.TabPages[e.Index];
+            bool active = tc.SelectedIndex == e.Index;
+            using (var b = new SolidBrush(active ? C.Card : C.Panel))
+                e.Graphics.FillRectangle(b, e.Bounds);
+            if (active)
+            {
+                using var p = new Pen(C.Accent, 2.5f);
+                e.Graphics.DrawLine(p, e.Bounds.Left + 8, e.Bounds.Bottom - 2, e.Bounds.Right - 8, e.Bounds.Bottom - 2);
+            }
+            var color = active ? C.Text : C.SubText;
+            var font = active ? TitleFont : BaseFont;
+            TextRenderer.DrawText(e.Graphics, tab.Text, font, e.Bounds, color,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+        };
+        tc.SelectedIndexChanged += (s, e) => { RecalcTabSize(tc); tc.Invalidate(); };
+        RecalcTabSize(tc);
+        tc.Invalidate();
+    }
+
+    /// <summary>按最长页签标题计算固定页签宽度，保证标题完整显示。</summary>
+    private static void RecalcTabSize(TabControl tc)
+    {
+        int w = 0;
+        foreach (TabPage tab in tc.TabPages)
+        {
+            var font = tab == tc.SelectedTab ? TitleFont : BaseFont;
+            w = Math.Max(w, TextRenderer.MeasureText(tab.Text, font).Width);
+        }
+        tc.ItemSize = new Size(w + 44, 38);
     }
 
     /// <summary>用圆角描边容器包裹输入控件，获得统一的现代输入框外观。</summary>

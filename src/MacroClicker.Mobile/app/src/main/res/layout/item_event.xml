@@ -1,78 +1,74 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="8dp"
-    android:background="@drawable/bg_card"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingHorizontal="12dp"
-    android:paddingVertical="10dp">
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
 
     <TextView
-        android:id="@+id/tvBadge"
-        android:layout_width="34dp"
-        android:layout_height="34dp"
-        android:background="@drawable/bg_badge"
+        android:id="@+id/tvIcon"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
         android:gravity="center"
-        android:textSize="15sp"
-        android:textStyle="bold"
-        tools:text="1" />
+        android:textSize="17sp"
+        android:contentDescription="@null" />
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="10dp"
         android:layout_weight="1"
+        android:layout_marginStart="12dp"
         android:orientation="vertical">
 
         <TextView
             android:id="@+id/tvTitle"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="?attr/colorOnSurface"
             android:textSize="14sp"
             android:textStyle="bold"
-            tools:text="点击 · (540, 960)" />
+            android:maxLines="1"
+            android:ellipsize="end" />
 
         <TextView
             android:id="@+id/tvSub"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="11sp"
-            tools:text="间隔 0.3s" />
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:textColor="?attr/colorOnSurfaceVariant" />
     </LinearLayout>
 
     <TextView
         android:id="@+id/btnUp"
         android:layout_width="34dp"
         android:layout_height="34dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
         android:gravity="center"
         android:text="↑"
-        android:textColor="?attr/colorPrimary"
-        android:textSize="16sp" />
+        android:textSize="15sp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/event_move_up" />
 
     <TextView
         android:id="@+id/btnDown"
         android:layout_width="34dp"
         android:layout_height="34dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
         android:gravity="center"
         android:text="↓"
-        android:textColor="?attr/colorPrimary"
-        android:textSize="16sp" />
+        android:textSize="15sp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/event_move_down" />
 
     <TextView
         android:id="@+id/btnDelete"
         android:layout_width="34dp"
         android:layout_height="34dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
         android:gravity="center"
         android:text="✕"
-        android:textColor="@color/danger"
-        android:textSize="15sp" />
+        android:textSize="15sp"
+        android:textColor="?attr/colorError"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/event_delete" />
 </LinearLayout>

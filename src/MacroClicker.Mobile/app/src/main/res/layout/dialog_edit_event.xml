@@ -1,268 +1,130 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:scrollbars="none">
+    android:orientation="vertical"
+    android:paddingStart="22dp"
+    android:paddingEnd="22dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="4dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/event_type"
+        android:textSize="13sp"
+        android:textColor="?attr/colorOnSurfaceVariant" />
+
+    <Spinner
+        android:id="@+id/spType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" />
+
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:hint="@string/event_delay"
+        app:suffixText="秒">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etDelay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="numberDecimal" />
+    </com.google.android.material.textfield.TextInputLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
-        android:paddingTop="18dp"
-        android:paddingBottom="8dp">
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/tvTitle"
-            android:layout_width="wrap_content"
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:textColor="?attr/colorOnSurface"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:hint="@string/event_x">
 
-        <!-- 执行前间隔 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="@string/field_delay"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="12sp" />
-
-        <EditText
-            android:id="@+id/etDelay"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="4dp"
-            android:background="@drawable/bg_input"
-            android:inputType="numberDecimal"
-            android:paddingHorizontal="10dp"
-            android:textSize="14sp" />
-
-        <!-- 点击坐标 -->
-        <LinearLayout
-            android:id="@+id/boxTap"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/field_x"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:textSize="12sp" />
-
-                <EditText
-                    android:id="@+id/etX"
-                    android:layout_width="match_parent"
-                    android:layout_height="44dp"
-                    android:layout_marginTop="4dp"
-                    android:background="@drawable/bg_input"
-                    android:inputType="number"
-                    android:paddingHorizontal="10dp"
-                    android:textSize="14sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/field_y"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:textSize="12sp" />
-
-                <EditText
-                    android:id="@+id/etY"
-                    android:layout_width="match_parent"
-                    android:layout_height="44dp"
-                    android:layout_marginTop="4dp"
-                    android:background="@drawable/bg_input"
-                    android:inputType="number"
-                    android:paddingHorizontal="10dp"
-                    android:textSize="14sp" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <!-- 滑动参数 -->
-        <LinearLayout
-            android:id="@+id/boxSwipe"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <LinearLayout
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etX"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:inputType="numberSigned|numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
 
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/field_x1"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/etX1"
-                        android:layout_width="match_parent"
-                        android:layout_height="44dp"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/bg_input"
-                        android:inputType="number"
-                        android:paddingHorizontal="10dp"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/field_y1"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/etY1"
-                        android:layout_width="match_parent"
-                        android:layout_height="44dp"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/bg_input"
-                        android:inputType="number"
-                        android:paddingHorizontal="10dp"
-                        android:textSize="14sp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/field_x2"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/etX2"
-                        android:layout_width="match_parent"
-                        android:layout_height="44dp"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/bg_input"
-                        android:inputType="number"
-                        android:paddingHorizontal="10dp"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:text="@string/field_y2"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="12sp" />
-
-                    <EditText
-                        android:id="@+id/etY2"
-                        android:layout_width="match_parent"
-                        android:layout_height="44dp"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/bg_input"
-                        android:inputType="number"
-                        android:paddingHorizontal="10dp"
-                        android:textSize="14sp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="@string/field_duration"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:textSize="12sp" />
-
-            <EditText
-                android:id="@+id/etDuration"
-                android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:layout_marginTop="4dp"
-                android:background="@drawable/bg_input"
-                android:inputType="number"
-                android:paddingHorizontal="10dp"
-                android:textSize="14sp" />
-        </LinearLayout>
-
-        <!-- 按钮 -->
-        <LinearLayout
-            android:layout_width="match_parent"
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:orientation="horizontal"
-            android:gravity="end">
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:hint="@string/event_y">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnCancel"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="wrap_content"
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etY"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/cancel" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnSave"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="@string/save" />
-        </LinearLayout>
+                android:inputType="numberSigned|numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
     </LinearLayout>
-</ScrollView>
+
+    <LinearLayout
+        android:id="@+id/rowEnd"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal">
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:hint="@string/event_x2">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etX2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="numberSigned|numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:hint="@string/event_y2">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etY2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="numberSigned|numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+    </LinearLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/tilDuration"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="@string/event_duration"
+        app:suffixText="ms">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etDuration"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number" />
+    </com.google.android.material.textfield.TextInputLayout>
+</LinearLayout>

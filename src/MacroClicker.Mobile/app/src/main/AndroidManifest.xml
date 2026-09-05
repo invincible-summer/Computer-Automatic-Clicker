@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 悬浮控制球/面板需要显示在其他应用上层 -->
+    <!-- 悬浮控制球与录制层需要显示在其他应用上层 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
+        android:name=".App"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -15,16 +16,18 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- 无障碍服务：负责向其他应用注入手势（点击/滑动）并承载悬浮控制 -->
+        <!-- 无障碍服务：手势注入（点击/滑动/长按）与录制层的宿主；
+             不读取任何屏幕内容（canRetrieveWindowContent=false） -->
         <service
-            android:name=".service.ClickService"
+            android:name=".service.MacroService"
             android:exported="true"
             android:label="@string/accessibility_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

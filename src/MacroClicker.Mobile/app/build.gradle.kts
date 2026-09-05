@@ -11,13 +11,18 @@ android {
         applicationId = "com.macroclicker.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
+    }
+
+    buildFeatures {
+        viewBinding = true
     }
 
     signingConfigs {
         create("release") {
-            // CI 中通过环境变量注入签名信息；本地未配置时退回 debug 签名
+            // CI 提交了固定密钥 release.keystore（保证每次构建签名一致，可覆盖安装）；
+            // 本地无密钥环境时自动回退 debug 签名
             val ks = System.getenv("MC_KEYSTORE")
             if (!ks.isNullOrBlank()) {
                 storeFile = rootProject.file(ks)
@@ -32,11 +37,10 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (!System.getenv("MC_KEYSTORE").isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (!System.getenv("MC_KEYSTORE").isNullOrBlank()) {
+                signingConfigs.getByName("release")
             } else {
-                // 本地无签名环境时回退 debug 签名，保证 assembleRelease 产物可直接安装
-                signingConfig = signingConfigs.getByName("debug")
+                signingConfigs.getByName("debug")
             }
         }
     }
@@ -49,7 +53,6 @@ android {
         jvmTarget = "17"
     }
     lint {
-        // CI 只需产出 APK，避免静态检查中断构建
         checkReleaseBuilds = false
         abortOnError = false
     }
