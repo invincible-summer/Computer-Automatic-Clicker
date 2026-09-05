@@ -2,7 +2,7 @@
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
-publish/
+# publish/ 为随仓库分发的成品目录（exe 与 apk），不入此忽略规则
 artifacts/
 
 # ===== IDE / 编辑器 =====

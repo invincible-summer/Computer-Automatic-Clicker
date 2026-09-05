@@ -22,7 +22,10 @@
 
 ### 安装使用
 
-1. 下载 APK：GitHub 仓库 → **Actions** → 选择 `Android APK` 工作流运行 → 下载 `MacroClicker-Android-APK` 产物，安装到手机（需允许「安装未知应用」）
+1. 下载 APK（两种方式任选）：
+   - **仓库离线包**：`publish/android/MacroClicker-v1.0.0-android.apk`，直接随仓库分发
+   - **云构建最新版**：GitHub 仓库 → **Actions** → 选择 `Android APK` 工作流运行 → 下载 `MacroClicker-Android-APK` 产物
+   安装到手机（需允许「安装未知应用」）
 2. 打开 App，按引导完成两项授权：
    - **无障碍服务**（手势执行必需）：点击跳转系统设置开启「宏连点器」
    - **悬浮窗权限**（悬浮控制必需）：点击跳转授权「显示在其他应用上层」
