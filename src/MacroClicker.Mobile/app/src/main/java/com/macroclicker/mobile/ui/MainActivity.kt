@@ -48,19 +48,12 @@ class MainActivity : AppCompatActivity() {
     private var config: MacroConfig = MacroConfig()
     private var wasBusy = false
 
-    /** 服务异步拉起后待执行的动作（开始录制/执行）。 */
-    private var pendingAction: (() -> Unit)? = null
-
     private val stateListener: () -> Unit = {
         if (!MacroService.isPlaying && !MacroService.isRecording && wasBusy) {
             // 录制/执行刚结束：重载当前宏（录制会替换事件）
             reloadConfig()
         }
         wasBusy = MacroService.isPlaying || MacroService.isRecording
-        if (MacroService.isRunning) {
-            pendingAction?.let { it() }
-            pendingAction = null
-        }
         refreshDynamicState()
     }
 
@@ -564,15 +557,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 确保前台服务已启动后执行动作（服务异步拉起时挂起待办）。 */
+    /** 确保前台服务已启动后执行动作（服务异步拉起时由服务在 onCreate 执行）。 */
     private fun withService(action: (MacroService) -> Unit) {
-        val svc = MacroService.instance
-        if (svc != null) {
-            action(svc)
-        } else {
-            pendingAction = { MacroService.instance?.let(action) }
-            MacroService.ensureStarted(this)
-        }
+        MacroService.ensureStarted(this, action)
     }
 
     private fun startRecordingFlow() {

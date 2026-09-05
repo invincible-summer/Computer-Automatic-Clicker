@@ -63,13 +63,20 @@ class MacroService : Service() {
             }
         }
 
-        /** 前台（Activity 内）调用，确保服务已启动。 */
-        fun ensureStarted(context: Context) {
-            if (instance == null) {
+        /** 前台（Activity 内）调用，确保服务已启动；服务异步拉起期间挂起 action，onCreate 时执行。 */
+        fun ensureStarted(context: Context, action: ((MacroService) -> Unit)? = null) {
+            pendingStart = action
+            val svc = instance
+            if (svc != null) {
+                action?.invoke(svc)
+            } else {
                 ContextCompat.startForegroundService(
                     context, Intent(context, MacroService::class.java))
             }
         }
+
+        @Volatile
+        private var pendingStart: ((MacroService) -> Unit)? = null
 
         fun stopIfIdle(context: Context) {
             val it = instance ?: return
@@ -123,6 +130,9 @@ class MacroService : Service() {
         Injector.addStateListener(injectorListener)
         ball = FloatingBall(this).also { it.show() }
         notifyState()
+        // 执行拉起服务时挂起的动作（开始录制/执行）——不依赖 Activity 是否仍在前台
+        pendingStart?.let { runCatching { it(this) } }
+        pendingStart = null
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
