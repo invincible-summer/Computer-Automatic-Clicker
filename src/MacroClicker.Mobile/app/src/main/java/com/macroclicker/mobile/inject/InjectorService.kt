@@ -85,7 +85,7 @@ class InjectorService : AccessibilityService() {
         val latch = CountDownLatch(1)
         var completed = false
         val accepted = runCatching {
-            dispatchGesture(gesture, object : GestureDescription.GestureResultCallback() {
+            dispatchGesture(gesture, object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     completed = true
                     latch.countDown()
