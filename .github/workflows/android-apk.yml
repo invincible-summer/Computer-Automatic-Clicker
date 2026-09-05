@@ -61,18 +61,21 @@ jobs:
         working-directory: src/MacroClicker.Mobile
         run: |
           set +e
-          # 日志尾部全部作为注解输出（API/邮件可见）
-          tail -n 80 gradle-build.log | while IFS= read -r line; do
-            [ -n "$line" ] && echo "::error::${line:0:220}"
+          # FAILURE 块完整作为注解输出
+          sed -n '/FAILURE: Build failed/,/^$/p' gradle-build.log | head -40 | while IFS= read -r line; do
+            echo "::error::$GITHUB_RUN_NUMBER|$line"
           done
-          # 兜底：完整日志推到 ci-logs 分支
+          grep -i -n "aidl" gradle-build.log | grep -vi "compileReleaseAidl\|AidlCompile'" | head -20 | while IFS= read -r line; do
+            echo "::error::$GITHUB_RUN_NUMBER|AIDL|$line"
+          done
+          # 完整日志推到 ci-logs 分支（基于 main，非 orphan）
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan "ci-logs-tmp"
-          git rm -rf -q . || true
-          git add -f gradle-build.log
+          git checkout -B ci-logs
+          mkdir -p .debug && cp gradle-build.log .debug/
+          git add -f .debug/gradle-build.log
           git commit -m "ci-debug: build log for run $GITHUB_RUN_NUMBER"
-          git push --force origin "HEAD:ci-logs"
+          git push --force origin ci-logs
           exit 1
 
       - name: 整理产物到 publish/android（替换旧 APK）
