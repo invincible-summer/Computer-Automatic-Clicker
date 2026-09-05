@@ -24,6 +24,9 @@ internal sealed class MainForm : Form
     private MacroStore.TargetSettings _emuSettings = new();
     /// <summary>当前 UI 展示/编辑的目标页（切页时先把面板值快照回离开的目标）。</summary>
     private MacroTarget _curTarget = MacroTarget.Windows;
+    /// <summary>各页面当前宏名（null=未命名、未关联文件）与“已修改未保存”标记。</summary>
+    private string? _winMacroName, _emuMacroName;
+    private bool _winDirty, _emuDirty;
 
     // ---- 模拟器（ADB）----
     private EmulatorSession? _emu;
@@ -31,14 +34,17 @@ internal sealed class MainForm : Form
     private List<EmulatorCandidate> _emuCandidates = new();
     private Func<List<MuMuInstance>>? _mumuRequery;
     private bool _discovering;
+    private bool _connecting;
 
     // ---- 控件 ----
     private readonly AppListView _lvWin, _lvEmu;
     private readonly AppButton _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay;
-    private readonly AppButton _btnSave, _btnDelete, _btnTheme;
-    private readonly ComboBox _cmbMacro, _cmbDevice;
-    private readonly AppButton _btnRefresh, _btnConnect, _btnDisconnect;
-    private readonly Label _lblDevice;
+    private readonly AppButton _btnOpenMacro, _btnNewMacro, _btnSave, _btnDelete, _btnClear, _btnTheme;
+    private readonly Label _lblMacroName;
+    private readonly ComboBox _cmbDevice;
+    private readonly AppButton _btnRefresh, _btnConnect;
+    private readonly Label _lblDevice, _dotDevice;
+    private readonly Panel _stripLine;
     private readonly ComboBox _cmbMode, _cmbSpeed;
     private readonly NumericUpDown _numCount, _numInterval, _numCountdown;
     private readonly CheckBox _ckKeys, _ckClicks, _ckWheel, _ckDrags, _ckFailsafe;
@@ -48,6 +54,7 @@ internal sealed class MainForm : Form
     private ContextMenuStrip? _menu;
     private readonly ToolStripStatusLabel _lblStatus, _lblCount, _lblHotkeys;
     private StatusKind _statusKind = StatusKind.Info;
+    private ToolTip _tt = null!;
 
     private AppState _state = AppState.Idle;
     private bool _failSafeTriggered;
@@ -76,93 +83,98 @@ internal sealed class MainForm : Form
         _btnPlay = MkBtn("▶ 执行", AppVariant.Primary);
         _btnPause = MkBtn("⏸ 暂停", AppVariant.Neutral);
         _btnStopPlay = MkBtn("⏹ 停止", AppVariant.Danger);
+        _btnOpenMacro = MkBtn("打开宏", AppVariant.Neutral);
+        _btnNewMacro = MkBtn("新建", AppVariant.Neutral);
         _btnSave = MkBtn("保存", AppVariant.Ghost);
-        _btnDelete = MkBtn("删除宏", AppVariant.Ghost);
+        _btnDelete = MkBtn("删除", AppVariant.Ghost);
+        _btnClear = MkBtn("清空", AppVariant.Ghost);
         _btnTheme = MkBtn(UiTheme.Dark ? "☀ 浅色" : "🌙 深色", AppVariant.Ghost);
         _btnTheme.Margin = new Padding(8, 3, 2, 3);
 
-        var tt = new ToolTip();
+        _tt = new ToolTip();
+        var tt = _tt;
         tt.SetToolTip(_btnRecord, "开始录制 (F6)");
         tt.SetToolTip(_btnStopRec, "停止录制 (F7)");
         tt.SetToolTip(_btnPlay, "开始执行 (F8)");
         tt.SetToolTip(_btnPause, "暂停 / 继续 (F9)");
         tt.SetToolTip(_btnStopPlay, "停止一切执行与录制 (F10)");
-        tt.SetToolTip(_btnSave, "保存当前宏（名称取下拉框文本）");
-        tt.SetToolTip(_btnDelete, "删除下拉框选中的宏文件");
+        tt.SetToolTip(_btnOpenMacro, "打开宏库：搜索 / 打开 / 重命名 / 删除宏");
+        tt.SetToolTip(_btnNewMacro, "新建空白宏");
+        tt.SetToolTip(_btnSave, "保存当前宏（未命名时会要求输入名称）");
+        tt.SetToolTip(_btnDelete, "删除当前宏对应的文件");
+        tt.SetToolTip(_btnClear, "清空当前事件列表（不影响已保存文件）");
 
-        _cmbMacro = new ComboBox
+        // 当前宏独立显示（只读 + 脏标记），名称输入与选择统一收进「打开宏」对话框
+        _lblMacroName = new Label
         {
-            DropDownStyle = ComboBoxStyle.DropDown,
-            Width = 190,
-            Margin = new Padding(10, 5, 2, 5),
-            IntegralHeight = false
-        };
-        var macroWrap = UiTheme.Wrap(_cmbMacro);
-        macroWrap.Margin = new Padding(10, 8, 2, 8);
-        _cmbMacro.TextUpdate += (s, e) => AutoCompleteMacroName();
-        _cmbMacro.SelectedIndexChanged += (s, e) => OnMacroSelected();
-        _cmbMacro.KeyDown += (s, e) =>
-        {
-            // 输入已有宏名后回车 = 直接加载
-            if (e.KeyCode == Keys.Enter)
-            {
-                var path = MacroStore.PathOf(Target, _cmbMacro.Text.Trim());
-                if (File.Exists(path) && _cmbMacro.SelectedIndex < 0)
-                {
-                    var idx = _cmbMacro.Items.IndexOf(_cmbMacro.Text.Trim());
-                    if (idx >= 0) _cmbMacro.SelectedIndex = idx;
-                }
-                e.Handled = true;
-            }
+            Text = "未命名宏",
+            AutoSize = false,
+            Size = new Size(160, 24),
+            Margin = new Padding(6, 15, 6, 0),
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true,
+            Font = UiTheme.TitleFont
         };
 
         toolbar.Controls.AddRange(new Control[]
         {
             _btnRecord, _btnStopRec, _btnPlay, _btnPause, _btnStopPlay,
             new Panel { Width = 2, Height = 26, Margin = new Padding(6, 9, 6, 9), BackColor = UiTheme.C.Divider },
-            new Label { Text = "宏:", AutoSize = true, Margin = new Padding(2, 14, 2, 0) },
-            macroWrap, _btnSave, _btnDelete,
+            _btnOpenMacro, _btnNewMacro, _lblMacroName, _btnSave, _btnDelete, _btnClear,
             new Panel { Width = 2, Height = 26, Margin = new Padding(6, 9, 6, 9), BackColor = UiTheme.C.Divider },
             _btnTheme
         });
+        // 宏名标签占据剩余空间：窗口窄时收缩（省略号），宽时展开，保证主题按钮不被挤出
+        toolbar.Resize += (s, e) => FitMacroLabel();
 
-        // ---------- 模拟器连接条（仅模拟器页显示） ----------
-        _emuStrip = new FlowLayoutPanel
+        // ---------- 模拟器连接条（仅模拟器页显示；单行紧凑布局，高度固定不换行） ----------
+        _emuStrip = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 54,
-            Padding = new Padding(10, 10, 10, 4),
-            WrapContents = false,
-            Visible = false
+            Height = 46,
+            Visible = false,
+            BackColor = UiTheme.C.Panel
+        };
+        _stripLine = new Panel { Dock = DockStyle.Bottom, Height = 1, BackColor = UiTheme.C.Divider };
+        _dotDevice = new Label
+        {
+            Text = "●",
+            AutoSize = true,
+            Font = new Font(UiTheme.BaseFont.FontFamily, 10.5F),
+            ForeColor = UiTheme.C.SubText
         };
         _lblDevice = new Label
         {
-            Text = "未连接 · 点击「检测设备」",
+            Text = "未连接 · 点 ⟳ 检测设备",
             AutoSize = false,
-            Size = new Size(330, 26),
-            Margin = new Padding(2, 9, 8, 0),
+            Size = new Size(420, 20),
+            TextAlign = ContentAlignment.MiddleLeft,
             Tag = "sub",
-            TextAlign = ContentAlignment.MiddleLeft
+            AutoEllipsis = true
         };
         _cmbDevice = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDown,
-            Width = 330,
-            Margin = new Padding(2, 5, 2, 5),
+            Width = 250,
             IntegralHeight = false
         };
-        var deviceWrap = UiTheme.Wrap(_cmbDevice);
-        deviceWrap.Margin = new Padding(2, 8, 2, 8);
-        _btnRefresh = MkBtn("⟳ 检测设备", AppVariant.Neutral);
+        _btnRefresh = MkBtn("⟳", AppVariant.Neutral);
         _btnConnect = MkBtn("连接", AppVariant.Primary);
-        _btnDisconnect = MkBtn("断开", AppVariant.Ghost);
-        tt.SetToolTip(_cmbDevice, "下拉选择检测到的设备，或直接输入自定义 serial（如 127.0.0.1:5555）");
-        tt.SetToolTip(_btnRefresh, "自动发现 adb 与常见模拟器（MuMu/雷电/夜神/逍遥/蓝叠等）");
-        _emuStrip.Controls.AddRange(new Control[] { _lblDevice, deviceWrap, _btnRefresh, _btnConnect, _btnDisconnect });
+        tt.SetToolTip(_cmbDevice, "下拉选择检测到的设备，或直接输入 serial（如 127.0.0.1:5555）");
+        tt.SetToolTip(_btnRefresh, "检测设备：自动发现 adb 与常见模拟器（MuMu/雷电/夜神/逍遥/蓝叠等）");
+        tt.SetToolTip(_btnConnect, "连接 / 断开当前选中的设备");
+        _emuStrip.Controls.AddRange(new Control[]
+        {
+            _dotDevice, _lblDevice, _cmbDevice, _btnRefresh, _btnConnect, _stripLine
+        });
+        _emuStrip.Resize += (s, e) => LayoutEmuStrip();
 
         _btnRefresh.Click += (s, e) => DiscoverDevices();
-        _btnConnect.Click += (s, e) => ConnectDevice();
-        _btnDisconnect.Click += (s, e) => DisconnectDevice();
+        _btnConnect.Click += (s, e) =>
+        {
+            if (_emu != null && _emu.IsReady && SelectedSerial() == _emu.Serial) DisconnectDevice();
+            else ConnectDevice();
+        };
 
         // ---------- 事件列表 ×2 ----------
         _lvWin = MkList();
@@ -257,7 +269,7 @@ internal sealed class MainForm : Form
         py += 36;
         var hint = new Label
         {
-            Text = "提示：每行的“间隔”表示执行该行之前等待的\n时间；回放时该时间会除以播放速度。",
+            Text = "提示：「间隔」= 执行该行前等待的时间，\n回放时按播放速度等比缩短。",
             AutoSize = true,
             Tag = "sub",
             Location = new Point(16, py + 5)
@@ -290,6 +302,7 @@ internal sealed class MainForm : Form
             var lv = ActiveList;
             lv.Items.Add(MakeItem(ev, ActiveEvents.Count - 1));
             _lblCount.Text = $"事件 {ActiveEvents.Count}";
+            MarkDirty();
         };
         _recorder.Warn += msg => Ui(() => SetStatus("⚠ " + msg, StatusKind.Warn));
 
@@ -313,8 +326,11 @@ internal sealed class MainForm : Form
         _btnPlay.Click += (s, e) => StartPlayback();
         _btnPause.Click += (s, e) => TogglePause();
         _btnStopPlay.Click += (s, e) => StopAll();
-        _btnSave.Click += (s, e) => SaveMacro();
+        _btnOpenMacro.Click += (s, e) => OpenMacroPicker();
+        _btnNewMacro.Click += (s, e) => NewMacro();
+        _btnSave.Click += (s, e) => SaveMacroCore(interactive: true);
         _btnDelete.Click += (s, e) => DeleteMacro();
+        _btnClear.Click += (s, e) => ClearEvents();
         _btnTheme.Click += (s, e) => UiTheme.SetDark(!UiTheme.Dark);
 
         UiTheme.Changed += OnThemeChanged;
@@ -323,7 +339,8 @@ internal sealed class MainForm : Form
         RefreshStatus();
         LoadSettings();
         LoadSettingsToUI(MacroTarget.Windows);
-        RefreshMacroCombo();
+        RefreshMacroLabel();
+        FitMacroLabel();
         DiscoverDevices(); // 后台预检测，进入模拟器页即可选择
         SetState(AppState.Idle);
         RebuildList();
@@ -370,10 +387,10 @@ internal sealed class MainForm : Form
         SnapshotSettingsTo(_curTarget);
         _curTarget = Target;
         LoadSettingsToUI(Target);
-        RefreshMacroCombo();
+        RefreshMacroLabel();
         _emuStrip.Visible = Target == MacroTarget.Emulator;
         RebuildList();
-        UpdateDeviceButtons();
+        SetState(_state);
         if (Target == MacroTarget.Emulator && _emu != null)
             SetDeviceStatus("已连接 " + _emu.Describe(), true);
     }
@@ -384,9 +401,12 @@ internal sealed class MainForm : Form
         if (_menu != null) UiTheme.StyleMenu(_menu);
         _toolbar.BackColor = UiTheme.C.Panel;
         _emuStrip.BackColor = UiTheme.C.Panel;
+        _stripLine.BackColor = UiTheme.C.Divider;
         _btnTheme.Text = UiTheme.Dark ? "☀ 浅色" : "🌙 深色";
         if (_emu != null) SetDeviceStatus("已连接 " + _emu.Describe(), true);
+        RefreshMacroLabel();
         RefreshStatus();
+        UpdateDeviceButtons();
     }
 
     private void SetStatus(string text, StatusKind kind)
@@ -447,12 +467,14 @@ internal sealed class MainForm : Form
         _btnPause.Text = s == AppState.Paused ? "⏵ 继续" : "⏸ 暂停";
         _btnPause.Variant = s == AppState.Paused ? AppVariant.Success : AppVariant.Neutral;
         _btnStopPlay.Enabled = s is AppState.Playing or AppState.Paused or AppState.Recording;
+        _btnOpenMacro.Enabled = idle;
+        _btnNewMacro.Enabled = idle;
         _btnSave.Enabled = idle;
         _btnDelete.Enabled = idle;
+        _btnClear.Enabled = idle && ActiveEvents.Count > 0;
         _gRec.Enabled = idle;
         _gPlay.Enabled = idle;
         _numCount.Enabled = idle && _cmbMode.SelectedIndex == 1;
-        _cmbMacro.Enabled = idle;
         UpdateDeviceButtons();
         if (idle)
         {
@@ -522,7 +544,7 @@ internal sealed class MainForm : Form
         if (_state is AppState.Playing or AppState.Paused or AppState.Recording) return;
         if (ActiveEvents.Count == 0)
         {
-            SetStatus("没有可执行的事件，请先录制或从「宏」下拉选择", StatusKind.Bad);
+            SetStatus("没有可执行的事件，请先录制或「打开宏」加载", StatusKind.Bad);
             return;
         }
         if (Target == MacroTarget.Emulator && (_emu == null || !_emu.IsReady))
@@ -619,6 +641,7 @@ internal sealed class MainForm : Form
         {
             RebuildList();
             SelectIndex(i);
+            MarkDirty();
         }
     }
 
@@ -630,6 +653,7 @@ internal sealed class MainForm : Form
         foreach (int i in lv.SelectedIndices.Cast<int>().OrderByDescending(x => x))
             ActiveEvents.RemoveAt(i);
         RebuildList();
+        MarkDirty();
     }
 
     private void MoveSelected(int delta)
@@ -643,6 +667,7 @@ internal sealed class MainForm : Form
         (ActiveEvents[i], ActiveEvents[j]) = (ActiveEvents[j], ActiveEvents[i]);
         RebuildList();
         SelectIndex(j);
+        MarkDirty();
     }
 
     private void CopySelected()
@@ -654,6 +679,7 @@ internal sealed class MainForm : Form
         ActiveEvents.Insert(i + 1, ActiveEvents[i].Clone());
         RebuildList();
         SelectIndex(i + 1);
+        MarkDirty();
     }
 
     private void InsertEvent(MacroEvent ev)
@@ -682,6 +708,7 @@ internal sealed class MainForm : Form
             ActiveEvents.Insert(i, ev);
             RebuildList();
             SelectIndex(i);
+            MarkDirty();
         }
     }
 
@@ -698,6 +725,7 @@ internal sealed class MainForm : Form
         var insSwipe = new ToolStripMenuItem("插入滑动 / 长按…");
         var insKey = new ToolStripMenuItem("插入按键…");
         var insWait = new ToolStripMenuItem("插入等待…");
+        var clearAll = new ToolStripMenuItem("清空列表…");
 
         edit.Click += (s, e) => EditSelected();
         del.Click += (s, e) => DeleteSelected();
@@ -722,11 +750,13 @@ internal sealed class MainForm : Form
             InsertEvent(new MacroEvent { Type = EventType.Key, Vk = 0x0D, Delay = 0 });
         insWait.Click += (s, e) =>
             InsertEvent(new MacroEvent { Type = EventType.Wait, Delay = 1 });
+        clearAll.Click += (s, e) => ClearEvents();
 
         m.Items.AddRange(new ToolStripItem[]
         {
             edit, del, new ToolStripSeparator(), up, down, copy,
-            new ToolStripSeparator(), insClick, insSwipe, insKey, insWait
+            new ToolStripSeparator(), insClick, insSwipe, insKey, insWait,
+            new ToolStripSeparator(), clearAll
         });
 
         m.Opening += (s, e) =>
@@ -743,6 +773,7 @@ internal sealed class MainForm : Form
             insSwipe.Visible = Target == MacroTarget.Emulator;
             insSwipe.Enabled = idle;
             insClick.Text = Target == MacroTarget.Emulator ? "插入点击(设备)…" : "插入鼠标点击…";
+            clearAll.Enabled = idle && ActiveEvents.Count > 0;
         };
         UiTheme.StyleMenu(m);
         return m;
@@ -761,7 +792,7 @@ internal sealed class MainForm : Form
     {
         if (_discovering) return;
         _discovering = true;
-        _btnRefresh.Enabled = false;
+        UpdateDeviceButtons();
         SetDeviceStatus("正在检测 adb 与模拟器…", false);
         Task.Run(() =>
         {
@@ -769,7 +800,6 @@ internal sealed class MainForm : Form
             Ui(() =>
             {
                 _discovering = false;
-                _btnRefresh.Enabled = true;
                 _adb = adb;
                 _emuCandidates = devices;
                 _mumuRequery = devices.FirstOrDefault()?.MumuRequery;
@@ -802,49 +832,53 @@ internal sealed class MainForm : Form
 
     private string? _settingsEmuSerial;
 
+    /// <summary>解析设备下拉当前文本 → adb serial（候选显示文本 / “家族 · serial · 分辨率” / 纯数字端口 / 自定义 serial）。</summary>
+    private string? SelectedSerial()
+    {
+        var text = _cmbDevice.Text.Trim();
+        if (text.Length == 0) return null;
+        var cand = _emuCandidates.FirstOrDefault(c => c.Display == text);
+        if (cand != null) return cand.Serial;
+        if (text.Contains('·'))
+            return text.Split('·')[1].Trim();
+        return int.TryParse(text, out int port) ? $"127.0.0.1:{port}" : text;
+    }
+
     /// <summary>连接下拉选择（或手动输入）的设备。</summary>
     private void ConnectDevice()
     {
+        if (_connecting) return;
         if (_adb == null)
         {
-            SetDeviceStatus("尚未检测到 adb，先点「检测设备」", false);
+            SetDeviceStatus("尚未检测到 adb，正在检测…", false);
             DiscoverDevices();
             return;
         }
-        var text = _cmbDevice.Text.Trim();
-        if (text.Length == 0)
+        var serial = SelectedSerial();
+        if (serial == null)
         {
             SetDeviceStatus("请先选择或输入设备（如 127.0.0.1:5555）", false);
             return;
         }
-        string serial = text;
-        var candidate = _emuCandidates.FirstOrDefault(c => c.Display == text);
-        if (candidate != null)
-        {
-            serial = candidate.Serial;
-        }
-        else if (text.Contains('·'))
-        {
-            serial = text.Split('·')[1].Trim(); // 显示文本形如 "家族 · 127.0.0.1:16384 · 分辨率"
-        }
-        else if (int.TryParse(text, out int port))
-        {
-            serial = $"127.0.0.1:{port}";
-        }
-
-        SetDeviceStatus($"正在连接 {serial} …", false);
+        var candidate = _emuCandidates.FirstOrDefault(c => c.Serial == serial);
         var family = candidate?.Family ?? "自定义设备";
         var mumu = candidate?.Mumu;
         var requery = _mumuRequery;
+
+        _connecting = true;
+        UpdateDeviceButtons();
+        SetDeviceStatus($"正在连接 {serial} …", false);
         Task.Run(() =>
         {
             var session = new EmulatorSession(_adb!, serial, family, mumu, requery);
             var error = session.Connect();
             Ui(() =>
             {
+                _connecting = false;
                 if (error.Length > 0)
                 {
                     SetDeviceStatus($"连接 {serial} 失败：{error}", false);
+                    UpdateDeviceButtons();
                     return;
                 }
                 _emu = session;
@@ -864,115 +898,254 @@ internal sealed class MainForm : Form
         SetState(_state);
     }
 
+    /// <summary>连接条布局：状态圆点 + 状态文字靠左伸展，设备下拉 / 检测 / 连接按钮固定靠右。</summary>
+    private void LayoutEmuStrip()
+    {
+        int w = _emuStrip.Width;
+        if (w <= 10) return;
+        int h = _emuStrip.Height - 1; // 底部 1px 分隔线
+        var dotSize = _dotDevice.PreferredSize;
+        _dotDevice.Location = new Point(14, (h - dotSize.Height) / 2);
+        int left = 14 + dotSize.Width + 7;
+
+        _btnConnect.Location = new Point(w - 14 - _btnConnect.Width, (h - _btnConnect.Height) / 2);
+        _btnRefresh.Location = new Point(_btnConnect.Left - 8 - _btnRefresh.Width, (h - _btnRefresh.Height) / 2);
+        _cmbDevice.Location = new Point(_btnRefresh.Left - 8 - _cmbDevice.Width, (h - _cmbDevice.Height) / 2);
+
+        _lblDevice.Location = new Point(left, (h - _lblDevice.Height) / 2);
+        _lblDevice.Width = Math.Max(0, _cmbDevice.Left - 12 - left);
+    }
+
+    /// <summary>连接/断开共用一个按钮：选中的就是已连接设备 → 显示「断开」，否则显示「连接」；无死按钮。</summary>
     private void UpdateDeviceButtons()
     {
         var idle = _state == AppState.Idle;
-        _btnConnect.Enabled = idle && _adb != null;
-        _btnDisconnect.Enabled = idle && _emu != null;
+        bool selConnected = _emu != null && _emu.IsReady && SelectedSerial() == _emu.Serial;
+        _btnConnect.Text = selConnected ? "断开" : "连接";
+        _btnConnect.Variant = selConnected ? AppVariant.Neutral : AppVariant.Primary;
+        _btnConnect.Enabled = idle && !_connecting;
         _cmbDevice.Enabled = idle;
         _btnRefresh.Enabled = idle && !_discovering;
+        _dotDevice.ForeColor = selConnected ? UiTheme.C.Success
+                             : _connecting || _discovering ? UiTheme.C.Warning
+                             : UiTheme.C.SubText;
+        LayoutEmuStrip();
     }
 
-    // ================= 宏下拉 / 保存 / 删除 =================
+    // ================= 当前宏（独立显示 + 打开/新建/保存/删除/清空） =================
 
-    private void RefreshMacroCombo()
+    private string? CurMacroName
     {
-        _loadingMacro = true;
-        _cmbMacro.Items.Clear();
-        foreach (var (name, _) in MacroStore.ListMacros(Target))
-            _cmbMacro.Items.Add(name);
-        _cmbMacro.Text = "";
-        _cmbMacro.SelectedIndex = -1;
-        _loadingMacro = false;
+        get => _curTarget == MacroTarget.Emulator ? _emuMacroName : _winMacroName;
+        set { if (_curTarget == MacroTarget.Emulator) _emuMacroName = value; else _winMacroName = value; }
     }
 
-    private bool _loadingMacro;
-
-    private void OnMacroSelected()
+    private bool CurDirty
     {
-        if (_loadingMacro || _cmbMacro.SelectedIndex < 0) return;
-        string name = _cmbMacro.Text;
+        get => _curTarget == MacroTarget.Emulator ? _emuDirty : _winDirty;
+        set { if (_curTarget == MacroTarget.Emulator) _emuDirty = value; else _winDirty = value; }
+    }
+
+    private void MarkDirty()
+    {
+        CurDirty = true;
+        RefreshMacroLabel();
+    }
+
+    private void RefreshMacroLabel()
+    {
+        var name = CurMacroName;
+        _lblMacroName.Text = (name ?? "未命名宏") + (CurDirty ? " *" : "");
+        _lblMacroName.ForeColor = name == null ? UiTheme.C.SubText : UiTheme.C.Text;
+        _tt.SetToolTip(_lblMacroName, name == null
+            ? "当前列表未关联宏文件（保存时可命名）"
+            : "当前宏：" + name + (CurDirty ? "（有未保存修改）" : ""));
+    }
+
+    /// <summary>工具栏内宏名标签吃掉剩余宽度：窗口再窄也保证右侧按钮完整可见。</summary>
+    private void FitMacroLabel()
+    {
+        if (_toolbar is not FlowLayoutPanel flow) return;
+        int others = 0;
+        foreach (Control c in flow.Controls)
+        {
+            if (c == _lblMacroName) continue;
+            others += c.Margin.Horizontal + c.Width;
+        }
+        int avail = flow.ClientSize.Width - flow.Padding.Horizontal - others - _lblMacroName.Margin.Horizontal;
+        _lblMacroName.Width = Math.Max(64, avail);
+    }
+
+    /// <summary>切换/新建前处理未保存修改：是=保存后继续，否=丢弃修改继续，取消=中止。</summary>
+    private bool ConfirmDiscardDirty()
+    {
+        if (!CurDirty || ActiveEvents.Count == 0) return true;
+        var name = CurMacroName ?? "未命名宏";
+        var r = MessageBox.Show(this,
+            $"宏「{name}」有未保存的修改：\n\n[是] 保存后继续\n[否] 丢弃修改继续\n[取消] 留在当前宏",
+            "未保存的修改", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (r == DialogResult.Cancel) return false;
+        if (r == DialogResult.Yes && !SaveMacroCore(interactive: true)) return false;
+        return true;
+    }
+
+    private void OpenMacroPicker()
+    {
+        if (_state != AppState.Idle) return;
+        using var dlg = new MacroPickerForm(Target, CurMacroName);
+        dlg.ShowDialog(this);
+
+        // 同步对话框内对当前宏的重命名 / 删除
+        var cur = CurMacroName;
+        if (cur != null)
+        {
+            if (dlg.Renamed.TryGetValue(cur, out var renamed)) cur = renamed;
+            if (dlg.Deleted.Contains(cur))
+            {
+                CurMacroName = null;
+                CurDirty = ActiveEvents.Count > 0;
+                RefreshMacroLabel();
+                SetStatus("当前宏文件已删除（列表事件保留，可另存为新宏）", StatusKind.Warn);
+            }
+            else if (CurMacroName != cur)
+            {
+                CurMacroName = cur;
+                RefreshMacroLabel();
+            }
+        }
+
+        if (dlg.Action == MacroPickerForm.PickAction.Open)
+        {
+            if (!ConfirmDiscardDirty()) return;
+            LoadMacro(dlg.MacroName!);
+        }
+        else if (dlg.Action == MacroPickerForm.PickAction.Create) NewMacro(dlg.MacroName);
+    }
+
+    private void LoadMacro(string name)
+    {
         var path = MacroStore.PathOf(Target, name);
         if (!File.Exists(path)) return;
-        if (ActiveEvents.Count > 0 &&
-            MessageBox.Show($"加载宏「{name}」会替换当前 {ActiveEvents.Count} 个事件，继续吗？", "确认",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-        {
-            RefreshMacroCombo();
-            return;
-        }
         try
         {
-            var (macroName, list) = MacroStore.Load(path);
+            var (_, list) = MacroStore.Load(path);
             ActiveEvents.Clear();
             ActiveEvents.AddRange(list);
+            CurMacroName = name;
+            CurDirty = false;
             RebuildList();
-            SetStatus($"✔ 已加载宏「{macroName}」· {list.Count} 个事件", StatusKind.Good);
+            RefreshMacroLabel();
+            SetState(AppState.Idle);
+            SetStatus($"✔ 已加载宏「{name}」· {list.Count} 个事件", StatusKind.Good);
         }
         catch (Exception ex)
         {
-            MessageBox.Show("加载失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, "加载失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    /// <summary>下拉框输入时联想已有宏名（不强制），回车可加载。</summary>
-    private void AutoCompleteMacroName()
-    {
-        var text = _cmbMacro.Text;
-        if (text.Length == 0) return;
-        var hit = _cmbMacro.Items.Cast<string>()
-            .FirstOrDefault(n => n.StartsWith(text, StringComparison.OrdinalIgnoreCase));
-        if (hit == null || hit == text) return;
-        int start = text.Length;
-        _cmbMacro.Text = hit;
-        _cmbMacro.SelectionStart = start;
-        _cmbMacro.SelectionLength = hit.Length - start;
-    }
-
-    private void SaveMacro()
+    private void NewMacro(string? suggested = null)
     {
         if (_state != AppState.Idle) return;
-        var name = _cmbMacro.Text.Trim();
-        if (name.Length == 0)
+        if (!ConfirmDiscardDirty()) return;
+        string? name = suggested;
+        if (name != null && File.Exists(MacroStore.PathOf(Target, name))) name = null;
+        while (name == null)
         {
-            MessageBox.Show("请先在「宏」下拉框中输入或选择一个名称。", "提示");
-            _cmbMacro.Focus();
-            return;
+            var input = InputDialog.Show(this, "新建宏", "宏名称：", DefaultMacroName());
+            if (input == null) return;
+            name = MacroStore.SanitizeName(input);
+            if (File.Exists(MacroStore.PathOf(Target, name)))
+            {
+                MessageBox.Show(this, $"宏「{name}」已存在，请换一个名称。", "提示",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                name = null;
+            }
+        }
+        ActiveEvents.Clear();
+        CurMacroName = name;
+        CurDirty = false;
+        RebuildList();
+        RefreshMacroLabel();
+        SetState(AppState.Idle);
+        SetStatus($"已新建宏「{name}」：点击 ●录制，或右键列表插入事件", StatusKind.Info);
+    }
+
+    private string DefaultMacroName()
+    {
+        var names = MacroStore.ListMacros(Target).Select(t => t.Name).ToHashSet();
+        for (int i = 1; ; i++)
+        {
+            var n = $"宏 {i}";
+            if (!names.Contains(n)) return n;
+        }
+    }
+
+    /// <summary>保存当前宏；未命名时提示输入，重名时确认覆盖。返回是否保存成功。</summary>
+    private bool SaveMacroCore(bool interactive)
+    {
+        string? name = CurMacroName;
+        while (name == null)
+        {
+            var input = InputDialog.Show(this, "保存宏", "宏名称：", DefaultMacroName());
+            if (input == null) return false;
+            name = MacroStore.SanitizeName(input);
+            if (File.Exists(MacroStore.PathOf(Target, name)) &&
+                MessageBox.Show(this, $"宏「{name}」已存在，覆盖保存？", "确认",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                name = null;
+            }
         }
         if (ActiveEvents.Count == 0)
         {
-            MessageBox.Show("没有事件可保存。");
-            return;
+            if (interactive) MessageBox.Show(this, "没有事件可保存。", "提示");
+            return false;
         }
         try
         {
-            var path = MacroStore.PathOf(Target, name);
-            MacroStore.Save(path, name, Target, ActiveEvents);
-            RefreshMacroCombo();
-            _cmbMacro.Text = name;
+            MacroStore.Save(MacroStore.PathOf(Target, name), name, Target, ActiveEvents);
+            CurMacroName = name;
+            CurDirty = false;
+            RefreshMacroLabel();
             SetStatus($"✔ 已保存 {ActiveEvents.Count} 个事件 → 宏「{name}」", StatusKind.Good);
+            return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show("保存失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, "保存失败：" + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
         }
     }
 
     private void DeleteMacro()
     {
         if (_state != AppState.Idle) return;
-        var name = _cmbMacro.Text.Trim();
-        var path = MacroStore.PathOf(Target, name);
-        if (name.Length == 0 || !File.Exists(path))
+        var name = CurMacroName;
+        if (name == null || !File.Exists(MacroStore.PathOf(Target, name)))
         {
-            SetStatus("当前名称不是已保存的宏", StatusKind.Warn);
+            SetStatus("当前宏尚未保存为文件", StatusKind.Warn);
             return;
         }
-        if (MessageBox.Show($"确定删除宏「{name}」？", "确认",
+        if (MessageBox.Show(this, $"确定删除宏「{name}」？", "确认",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-        MacroStore.DeleteMacro(path);
-        RefreshMacroCombo();
-        SetStatus($"已删除宏「{name}」", StatusKind.Info);
+        MacroStore.DeleteMacro(MacroStore.PathOf(Target, name));
+        CurMacroName = null;
+        CurDirty = ActiveEvents.Count > 0;
+        RefreshMacroLabel();
+        SetStatus($"已删除宏「{name}」· 列表事件保留，可另存为新宏", StatusKind.Info);
+    }
+
+    private void ClearEvents()
+    {
+        if (_state != AppState.Idle || ActiveEvents.Count == 0) return;
+        if (MessageBox.Show(this, $"清空当前事件列表（共 {ActiveEvents.Count} 个事件）？\n不影响已保存的宏文件。",
+                "确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        ActiveEvents.Clear();
+        RebuildList();
+        MarkDirty();
+        SetState(AppState.Idle);
+        SetStatus("已清空事件列表", StatusKind.Info);
     }
 
     // ================= 设置持久化 =================
@@ -1124,6 +1297,37 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        // 退出前兜底：两页任一有未保存修改时询问（保存需命名时用输入框）
+        if (e.CloseReason == CloseReason.UserClosing || e.CloseReason == CloseReason.FormOwnerClosing)
+        {
+            var pending = new List<string>();
+            if (_winDirty && _winEvents.Count > 0) pending.Add("Windows：" + (_winMacroName ?? "未命名宏"));
+            if (_emuDirty && _emuEvents.Count > 0) pending.Add("模拟器：" + (_emuMacroName ?? "未命名宏"));
+            if (pending.Count > 0)
+            {
+                var r = MessageBox.Show(this,
+                    "有未保存的宏修改：\n" + string.Join("\n", pending) + "\n\n退出前保存吗？",
+                    "未保存的修改", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (r == DialogResult.Cancel) { e.Cancel = true; return; }
+                if (r == DialogResult.Yes)
+                {
+                    var back = _curTarget;
+                    bool ok = true;
+                    if (_winDirty && _winEvents.Count > 0)
+                    {
+                        _curTarget = MacroTarget.Windows;
+                        ok = SaveMacroCore(interactive: true);
+                    }
+                    if (ok && _emuDirty && _emuEvents.Count > 0)
+                    {
+                        _curTarget = MacroTarget.Emulator;
+                        ok = SaveMacroCore(interactive: true);
+                    }
+                    _curTarget = back;
+                    if (!ok) { e.Cancel = true; return; }
+                }
+            }
+        }
         StopAll();
         _player.Stop();
         _recorder.Stop();

@@ -158,6 +158,19 @@ internal static class MacroStore
         try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 
+    /// <summary>重命名宏：重写为新文件（同步 JSON 内 Name）后删除旧文件。</summary>
+    public static void Rename(MacroTarget target, string oldName, string newName)
+    {
+        var oldPath = PathOf(target, oldName);
+        var newPath = PathOf(target, newName);
+        if (!File.Exists(oldPath)) throw new FileNotFoundException("宏文件不存在", oldPath);
+        if (string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase)) return;
+        if (File.Exists(newPath)) throw new IOException($"宏「{newName}」已存在");
+        var (_, events) = Load(oldPath);
+        Save(newPath, newName, target, events);
+        File.Delete(oldPath);
+    }
+
     public static string PathOf(MacroTarget target, string name) =>
         Path.Combine(TargetDir(target), SanitizeName(name) + ".json");
 
