@@ -16,12 +16,12 @@ import android.widget.Toast
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.macroclicker.mobile.R
+import com.macroclicker.mobile.inject.Injector
 import com.macroclicker.mobile.model.EventType
 import com.macroclicker.mobile.model.MacroConfig
 import com.macroclicker.mobile.model.MacroEvent
 import com.macroclicker.mobile.overlay.FloatingBall
 import com.macroclicker.mobile.record.GestureRecorder
-import com.macroclicker.mobile.shell.ShellExecutor
 import com.macroclicker.mobile.store.MacroStore
 import java.util.concurrent.CopyOnWriteArraySet
 import kotlin.concurrent.thread
@@ -29,8 +29,9 @@ import kotlin.concurrent.thread
 /**
  * 前台服务（specialUse）：宿主悬浮球 + 回放引擎 + 录制引擎。
  *
- * v3.0 起不再使用无障碍服务——手势注入经 Shizuku（ADB shell uid）执行
- * /system/bin/input tap|swipe，回放线程同步等待注入结果，失败即停。
+ * 不使用无障碍服务——手势注入经 Shizuku（ADB shell uid）完成：
+ * 快速路径（InputManager.injectInputEvent，毫秒级）失败自动回落
+ * 固定 argv 的 /system/bin/input。回放线程同步等待注入结果，失败即停。
  *
  * 生命周期：任何录制/执行开始时自动拉起；「悬浮球常驻」开关（设置页）为 on
  * 时服务保留，否则会话结束即自毁。通知提供「停止一切 / 退出」操作。
@@ -102,6 +103,14 @@ class MacroService : Service() {
     @Volatile
     private var playStop = false
 
+    /** Shizuku 断开（状态离开 READY）时立即停止回放，绝不盲点续跑。 */
+    private val injectorListener: (Injector.State) -> Unit = { s ->
+        if (s != Injector.State.READY && isPlaying) {
+            stopPlayback()
+            status(getString(R.string.play_inject_fail))
+        }
+    }
+
     // ---------------- 生命周期 ----------------
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -111,7 +120,8 @@ class MacroService : Service() {
         instance = this
         createChannel()
         startAsForeground()
-        ShellExecutor.bind()
+        Injector.bind()
+        Injector.addStateListener(injectorListener)
         ball = FloatingBall(this).also { it.show() }
         notifyState()
     }
@@ -138,7 +148,8 @@ class MacroService : Service() {
         val b = ball
         mainHandler.post { b?.remove() }
         ball = null
-        ShellExecutor.unbind()
+        Injector.removeStateListener(injectorListener)
+        Injector.unbind()
         if (instance === this) instance = null
         notifyState()
     }
@@ -174,7 +185,7 @@ class MacroService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val builder = Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_stat_notif)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setOngoing(true)
@@ -204,8 +215,8 @@ class MacroService : Service() {
             ball?.setStatus(getString(R.string.toast_no_events))
             return false
         }
-        ShellExecutor.bind()
-        if (ShellExecutor.state != ShellExecutor.State.READY) {
+        Injector.bind()
+        if (Injector.state != Injector.State.READY) {
             ball?.setStatus(getString(R.string.shell_not_ready_short))
             Toast.makeText(this, R.string.shell_not_ready_short, Toast.LENGTH_SHORT).show()
             return false
@@ -262,8 +273,8 @@ class MacroService : Service() {
 
     /** 同步注入单个事件（回放线程）；WAIT 直接成功。 */
     private fun inject(ev: MacroEvent): Boolean = when (ev.type) {
-        EventType.TAP -> ShellExecutor.tap(ev.x, ev.y)
-        EventType.SWIPE -> ShellExecutor.swipe(
+        EventType.TAP -> Injector.tap(ev.x, ev.y)
+        EventType.SWIPE -> Injector.swipe(
             ev.x, ev.y, ev.x2, ev.y2, ev.duration.coerceIn(50, 60_000))
         EventType.WAIT -> true
     }
@@ -292,8 +303,8 @@ class MacroService : Service() {
 
     fun startRecording(liveReplay: Boolean): Boolean {
         if (isPlaying || isRecording) return false
-        // shell 未就绪时降级为纯标记录制（只记录、不作用于界面）
-        val withLive = liveReplay && ShellExecutor.state == ShellExecutor.State.READY
+        // 引擎未就绪时降级为纯标记录制（只记录、不作用于界面）
+        val withLive = liveReplay && Injector.state == Injector.State.READY
         if (liveReplay && !withLive) {
             Toast.makeText(this, R.string.rec_live_fallback, Toast.LENGTH_SHORT).show()
         }

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 事件编辑对话框：MaterialButtonToggleGroup 单选类型（点击/滑动/长按/等待），
+     字段随类型显隐；长按 = 起止同点的滑动（与桌面端宏格式互通）。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -13,20 +15,55 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/event_type"
-        android:textSize="13sp"
+        android:textAppearance="?attr/textAppearanceTitleSmall"
         android:textColor="?attr/colorOnSurfaceVariant" />
 
-    <Spinner
-        android:id="@+id/spType"
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/groupType"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp" />
+        android:layout_marginTop="6dp"
+        app:singleSelection="true"
+        app:selectionRequired="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTypeTap"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/event_type_tap" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTypeSwipe"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/event_type_swipe" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTypeLong"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/event_type_long" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnTypeWait"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/event_type_wait" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
 
     <com.google.android.material.textfield.TextInputLayout
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="12dp"
         android:hint="@string/event_delay"
         app:suffixText="秒">
 
@@ -40,7 +77,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="10dp"
         android:orientation="horizontal">
 
         <com.google.android.material.textfield.TextInputLayout
@@ -48,14 +85,13 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="6dp"
             android:hint="@string/event_x">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/etX"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="numberSigned|numberDecimal" />
+                android:inputType="numberSigned" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
@@ -63,14 +99,14 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
+            android:layout_marginStart="10dp"
             android:hint="@string/event_y">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/etY"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="numberSigned|numberDecimal" />
+                android:inputType="numberSigned" />
         </com.google.android.material.textfield.TextInputLayout>
     </LinearLayout>
 
@@ -78,22 +114,22 @@
         android:id="@+id/rowEnd"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="horizontal">
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
 
         <com.google.android.material.textfield.TextInputLayout
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="6dp"
             android:hint="@string/event_x2">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/etX2"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="numberSigned|numberDecimal" />
+                android:inputType="numberSigned" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
@@ -101,14 +137,14 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
+            android:layout_marginStart="10dp"
             android:hint="@string/event_y2">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/etY2"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="numberSigned|numberDecimal" />
+                android:inputType="numberSigned" />
         </com.google.android.material.textfield.TextInputLayout>
     </LinearLayout>
 
@@ -117,8 +153,9 @@
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="10dp"
         android:hint="@string/event_duration"
+        android:visibility="gone"
         app:suffixText="ms">
 
         <com.google.android.material.textfield.TextInputEditText

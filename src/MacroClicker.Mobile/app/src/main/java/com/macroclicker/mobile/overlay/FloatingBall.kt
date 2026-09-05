@@ -5,18 +5,23 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.ContextThemeWrapper
 import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import com.macroclicker.mobile.R
+import com.macroclicker.mobile.databinding.OverlayPanelBinding
 import com.macroclicker.mobile.service.MacroService
 import com.macroclicker.mobile.store.MacroStore
 import kotlin.math.abs
@@ -25,6 +30,9 @@ import kotlin.math.min
 /**
  * 悬浮控制球：可拖动、位置按屏幕比例记忆；点按展开控制面板。
  * 录制/执行中点球即停止，无需回到 App。
+ *
+ * v4：面板由 XML（overlay_panel.xml）以深色 M3 主题 inflate，
+ * 矢量图标替代文本符号；拖动/落点边界避让系统导航栏与挖孔。
  */
 class FloatingBall(private val service: MacroService) {
 
@@ -34,16 +42,30 @@ class FloatingBall(private val service: MacroService) {
 
     private var ball: View? = null
     private var ballParams: WindowManager.LayoutParams? = null
-    private var ballGlyph: TextView? = null
+    private var ballIcon: ImageView? = null
     private var panel: View? = null
     private var panelParams: WindowManager.LayoutParams? = null
     private var panelStatus: TextView? = null
 
-    private val ballSize get() = dp(54)
+    private val ballSize get() = dp(56)
 
     private fun dp(v: Int): Int = (v * service.resources.displayMetrics.density).toInt()
     private fun screenW(): Int = service.resources.displayMetrics.widthPixels
     private fun screenH(): Int = service.resources.displayMetrics.heightPixels
+
+    /** 底部系统栏 + 挖孔避让高度（悬浮窗坐标系按整屏计，需自行减去）。 */
+    private fun bottomInset(): Int {
+        if (Build.VERSION.SDK_INT >= 30) {
+            runCatching {
+                return wm.currentWindowMetrics.windowInsets
+                    .getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                    .bottom
+            }
+        }
+        val res = service.resources
+        val id = res.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (id > 0) res.getDimensionPixelSize(id) else dp(24)
+    }
 
     fun show() = handler.post { addBall() }
 
@@ -57,16 +79,16 @@ class FloatingBall(private val service: MacroService) {
     @SuppressLint("ClickableViewAccessibility")
     private fun addBall() {
         if (ball != null) return
-        val glyph = TextView(service).apply {
-            text = "▶"
-            setTextColor(0xFFFFFFFF.toInt())
-            textSize = 20f
-            gravity = Gravity.CENTER
+        val icon = ImageView(service).apply {
+            setImageResource(R.drawable.ic_ball_play)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            val pad = dp(15)
+            setPadding(pad, pad, pad, pad)
         }
-        ballGlyph = glyph
+        ballIcon = icon
         val v = FrameLayout(service).apply {
             setBackgroundResource(R.drawable.bg_ball)
-            addView(glyph, FrameLayout.LayoutParams(
+            addView(icon, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             ))
@@ -102,7 +124,8 @@ class FloatingBall(private val service: MacroService) {
                     if (abs(dx) > 8 || abs(dy) > 8) movedFar = true
                     if (movedFar) {
                         ballParams?.x = (startX + dx).coerceIn(0, (screenW() - ballSize).coerceAtLeast(0))
-                        ballParams?.y = (startY + dy).coerceIn(0, (screenH() - ballSize).coerceAtLeast(0))
+                        ballParams?.y = (startY + dy)
+                            .coerceIn(0, (screenH() - ballSize - bottomInset()).coerceAtLeast(0))
                         ball?.let { runCatching { wm.updateViewLayout(it, ballParams) } }
                     }
                     true
@@ -136,22 +159,22 @@ class FloatingBall(private val service: MacroService) {
         ball?.let { runCatching { wm.removeView(it) } }
         ball = null
         ballParams = null
-        ballGlyph = null
+        ballIcon = null
     }
 
     private fun refreshBallState() {
-        val glyph = ballGlyph ?: return
+        val icon = ballIcon ?: return
         when {
             MacroService.isRecording -> {
-                glyph.text = "■"
+                icon.setImageResource(R.drawable.ic_ball_stop)
                 ball?.setBackgroundResource(R.drawable.bg_ball_record)
             }
             MacroService.isPlaying -> {
-                glyph.text = "■"
+                icon.setImageResource(R.drawable.ic_ball_stop)
                 ball?.setBackgroundResource(R.drawable.bg_ball)
             }
             else -> {
-                glyph.text = "▶"
+                icon.setImageResource(R.drawable.ic_ball_play)
                 ball?.setBackgroundResource(R.drawable.bg_ball)
             }
         }
@@ -184,60 +207,29 @@ class FloatingBall(private val service: MacroService) {
             return
         }
 
-        val root = LinearLayout(service).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.bg_panel)
-            setPadding(dp(16), dp(14), dp(16), dp(12))
-        }
+        val themed = ContextThemeWrapper(service, R.style.Theme_MacroClicker_Overlay)
+        val b = OverlayPanelBinding.inflate(LayoutInflater.from(themed))
 
-        val title = root.addViewText(service.getString(R.string.panel_title), 15f, true)
-        panelStatus = root.addViewText(service.getString(R.string.panel_status_idle), 12f, color = 0xB3FFFFFF.toInt())
-
-        val grid = LinearLayout(service).apply { orientation = LinearLayout.VERTICAL }
-        val row1 = LinearLayout(service)
-        val row2 = LinearLayout(service)
-        grid.addView(row1, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        grid.addView(row2, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        root.addView(grid, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(10) })
-
-        fun cell(parent: LinearLayout, text: String, bg: Int, fg: Int, onClick: () -> Unit) {
-            val tv = TextView(service).apply {
-                this.text = text
-                textSize = 14f
-                gravity = Gravity.CENTER
-                setTextColor(fg)
-                setBackgroundResource(bg)
-                setPadding(dp(6), dp(10), dp(6), dp(10))
-                setOnClickListener { onClick() }
-            }
-            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            lp.marginEnd = dp(6)
-            lp.topMargin = dp(6)
-            parent.addView(tv, lp)
-        }
-
-        cell(row1, service.getString(R.string.panel_record), R.drawable.bg_panel_btn_accent, 0xFFFFFFFF.toInt()) {
+        b.panelClose.setOnClickListener { removePanel() }
+        b.btnPanelRecord.setOnClickListener {
             removePanel()
             tryRecord()
         }
-        cell(row1, service.getString(R.string.panel_play), R.drawable.bg_panel_btn, 0xFFFFFFFF.toInt()) {
+        b.btnPanelPlay.setOnClickListener {
             removePanel()
             service.startPlayback(MacroStore.loadCurrent(service))
         }
-        cell(row2, service.getString(R.string.panel_stop), R.drawable.bg_panel_btn_danger, 0xFFFFFFFF.toInt()) {
+        b.btnPanelStop.setOnClickListener {
             removePanel()
             MacroService.stopAll()
         }
-        cell(row2, service.getString(R.string.panel_open), R.drawable.bg_panel_btn, 0xFFFFFFFF.toInt()) {
+        b.btnPanelOpen.setOnClickListener {
             removePanel()
             openMainActivity()
         }
+        panelStatus = b.panelStatus
 
-        val width = min(dp(268), (screenW() * 0.86f).toInt())
+        val width = min(dp(280), (screenW() * 0.88f).toInt())
         val params = WindowManager.LayoutParams(
             width, WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -246,16 +238,18 @@ class FloatingBall(private val service: MacroService) {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             val bp = ballParams
-            x = ((bp?.x ?: 0) - width / 2 + ballSize / 2).coerceIn(dp(8), (screenW() - width - dp(8)).coerceAtLeast(dp(8)))
-            y = ((bp?.y ?: 0) + ballSize + dp(10)).coerceIn(dp(8), (screenH() - dp(320)).coerceAtLeast(dp(8)))
+            x = ((bp?.x ?: 0) - width / 2 + ballSize / 2)
+                .coerceIn(dp(8), (screenW() - width - dp(8)).coerceAtLeast(dp(8)))
+            y = ((bp?.y ?: 0) + ballSize + dp(10))
+                .coerceIn(dp(8), (screenH() - bottomInset() - dp(340)).coerceAtLeast(dp(8)))
         }
 
-        // 拖动条（标题行）
+        // 标题行可拖动面板
         var downRawX = 0f
         var downRawY = 0f
         var startX = 0
         var startY = 0
-        title.setOnTouchListener { _, e ->
+        b.rowDrag.setOnTouchListener { _, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downRawX = e.rawX; downRawY = e.rawY
@@ -266,7 +260,7 @@ class FloatingBall(private val service: MacroService) {
                     panelParams?.x = (startX + (e.rawX - downRawX).toInt())
                         .coerceIn(0, (screenW() - width).coerceAtLeast(0))
                     panelParams?.y = (startY + (e.rawY - downRawY).toInt())
-                        .coerceIn(0, (screenH() - dp(320)).coerceAtLeast(0))
+                        .coerceIn(0, (screenH() - bottomInset() - dp(200)).coerceAtLeast(0))
                     panel?.let { runCatching { wm.updateViewLayout(it, panelParams) } }
                     true
                 }
@@ -274,24 +268,10 @@ class FloatingBall(private val service: MacroService) {
             }
         }
 
-        runCatching { wm.addView(root, params) }
-        panel = root
+        runCatching { wm.addView(b.root, params) }
+        panel = b.root
         panelParams = params
         setStatus(currentStatusText())
-    }
-
-    private fun LinearLayout.addViewText(text: String, size: Float, bold: Boolean = false, color: Int = 0xFFFFFFFF.toInt()): TextView {
-        val tv = TextView(service).apply {
-            this.text = text
-            textSize = size
-            setTextColor(color)
-            this.gravity = Gravity.CENTER
-            paint.isFakeBoldText = bold
-        }
-        addView(tv, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(4) })
-        return tv
     }
 
     private fun tryRecord() {

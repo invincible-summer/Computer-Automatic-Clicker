@@ -3,21 +3,23 @@ package com.macroclicker.mobile.record
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.PixelFormat
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.macroclicker.mobile.R
+import com.macroclicker.mobile.inject.Injector
 import com.macroclicker.mobile.model.EventType
 import com.macroclicker.mobile.model.MacroEvent
 import com.macroclicker.mobile.service.MacroService
-import com.macroclicker.mobile.shell.ShellExecutor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -27,9 +29,12 @@ import kotlin.math.abs
  * 自动识别 点击 / 长按 / 滑动 / 等待（手势间隔）——与桌面端录制体验一致。
  *
  * 回放同步（liveReplay）：每个手势录制完成后立即经 Shizuku（shell uid）
- * 执行 /system/bin/input tap|swipe 注入真实应用（层短暂切为 FLAG_NOT_TOUCHABLE
- * 穿透），可边标记边让界面真实响应，支持「点按钮→等弹窗→再点」的多步录制；
- * 关闭或 Shizuku 未就绪时为纯标记录制（手势只被记录、不作用于界面）。
+ * 注入真实应用（层短暂切为 FLAG_NOT_TOUCHABLE 穿透），可边标记边让界面
+ * 真实响应，支持「点按钮→等弹窗→再点」的多步录制；关闭或引擎未就绪时
+ * 为纯标记录制（手势只被记录、不作用于界面）。
+ *
+ * v4：注入走快速路径（毫秒级），穿透窗口从 ~0.5s 缩至毫秒级，
+ * 物理触摸被漏记的时间窗大幅缩短。
  */
 class GestureRecorder(
     private val service: MacroService,
@@ -83,7 +88,7 @@ class GestureRecorder(
         stopping = false
 
         val frame = FrameLayout(service)
-        frame.setBackgroundColor(0x08000000.toInt()) // 极淡蒙层，提示“正在捕获”
+        frame.setBackgroundColor(0x08000000.toInt()) // 极淡蒙层（低于 Android 12 不透明度阈值），提示“正在捕获”
 
         val chip = TextView(service).apply {
             text = service.getString(R.string.rec_hint)
@@ -97,7 +102,7 @@ class GestureRecorder(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        ).apply { topMargin = statusBarHeight() + dp(10) })
+        ).apply { topMargin = topInset() + dp(10) })
 
         frame.setOnTouchListener { _, e -> onTouchEvent(e) }
 
@@ -177,7 +182,7 @@ class GestureRecorder(
     }
 
     /**
-     * 回放同步：在录制层上发生的手势不达应用，改为把等效命令注入层下方应用。
+     * 回放同步：在录制层上发生的手势不达应用，改为把等效事件注入层下方应用。
      * 层在注入期间置 FLAG_NOT_TOUCHABLE 放行（注入事件按坐标命中下层应用），
      * 同步命令返回后恢复可触摸；注入串行执行，永不阻塞主线程。
      */
@@ -185,8 +190,8 @@ class GestureRecorder(
         setLayerTouchNow(false)
         replayExecutor.execute {
             val ok = when (ev.type) {
-                EventType.TAP -> ShellExecutor.tap(ev.x, ev.y)
-                EventType.SWIPE -> ShellExecutor.swipe(ev.x, ev.y, ev.x2, ev.y2,
+                EventType.TAP -> Injector.tap(ev.x, ev.y)
+                EventType.SWIPE -> Injector.swipe(ev.x, ev.y, ev.x2, ev.y2,
                     ev.duration.coerceIn(50, 60_000))
                 EventType.WAIT -> true
             }
@@ -220,10 +225,19 @@ class GestureRecorder(
         onFinished(if (save) events.toList() else emptyList())
     }
 
-    private fun statusBarHeight(): Int {
-        val res = service.resources
-        val id = res.getIdentifier("status_bar_height", "dimen", "android")
-        return if (id > 0) res.getDimensionPixelSize(id) else dp(28)
+    /** 顶部避让高度：状态栏 + 挖孔（API 30+ 用 WindowMetrics，旧版回退系统资源）。 */
+    private fun topInset(): Int {
+        return if (Build.VERSION.SDK_INT >= 30) {
+            runCatching {
+                wm.currentWindowMetrics.windowInsets
+                    .getInsets(WindowInsets.Type.statusBars() or WindowInsets.Type.displayCutout())
+                    .top
+            }.getOrDefault(dp(28))
+        } else {
+            val res = service.resources
+            val id = res.getIdentifier("status_bar_height", "dimen", "android")
+            if (id > 0) res.getDimensionPixelSize(id) else dp(28)
+        }
     }
 
     private fun round2(v: Double) = Math.round(v * 100.0) / 100.0

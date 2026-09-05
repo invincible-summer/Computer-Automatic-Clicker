@@ -1,4 +1,4 @@
-package com.macroclicker.mobile.shell
+package com.macroclicker.mobile.inject
 
 import android.content.ComponentName
 import android.content.Context
@@ -11,26 +11,32 @@ import rikka.shizuku.Shizuku
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
- * Shizuku 注入后端状态机：
- * 未安装 / 未运行 / 版本过旧 / 未授权 / 就绪。
+ * 注入引擎管理器（替代 v3 的 ShellExecutor）：
+ * Shizuku 状态机（未安装/未运行/版本过旧/未授权/就绪）+ UserService 绑定 +
+ * 快速/兼容通道能力探测 + 注入失败重估。
  *
- * bind() 在就绪后绑定 UserService（shell uid），tap/swipe 生成固定 argv 数组
- * 调用 /system/bin/input —— 无 shell 字符串拼接，无注入风险。
- * 所有状态变化回调都在主线程；exec 允许任意线程（Binder 同步调用）。
+ * - 就绪后 bind() 绑定 UserService（shell uid），连接成功即 probe() 探测能力，
+ *   `fastMode` 供 UI 显示「快速注入 / 兼容模式」（实现内部总会自动回落，双保险）。
+ * - tap/swipe 可在任意线程同步调用（Binder 调用）；UI 永不调用。
+ * - Binder 断开时状态回退并广播，MacroService 据此「失败即停」。
+ * - 仅当「尚未连接」导致失败时会重绑一次重试；已连接后的失败不重试，
+ *   避免对已生效的事件造成重复注入。
  */
-object ShellExecutor {
+object Injector {
 
     enum class State { NOT_INSTALLED, NOT_RUNNING, UNSUPPORTED, UNAUTHORIZED, READY }
 
-    const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
-    const val REQUEST_CODE = 10001
+    /** 注入通道能力（连接 UserService 后探测；null = 尚未探测）。 */
+    @Volatile
+    var fastMode: Boolean? = null
+        private set
 
     @Volatile
     var state: State = State.NOT_RUNNING
         private set
 
     @Volatile
-    private var shell: IShellService? = null
+    private var service: IInjectorService? = null
 
     @Volatile
     private var bound = false
@@ -39,23 +45,25 @@ object ShellExecutor {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<(State) -> Unit>()
 
-    private val userServiceArgs: Shizuku.UserServiceArgs by lazy {
-        val ctx = appContext ?: throw IllegalStateException("ShellExecutor 未初始化")
+    val userServiceArgs: Shizuku.UserServiceArgs by lazy {
+        val ctx = appContext ?: throw IllegalStateException("Injector 未初始化")
         Shizuku.UserServiceArgs(
-            ComponentName(ctx.packageName, ShellServiceImpl::class.java.name)
+            ComponentName(ctx.packageName, InjectorServiceImpl::class.java.name)
         )
-            .processNameSuffix("shell")
-            .version(1)
-            .tag("macro-shell")
+            .processNameSuffix("injector")
+            .version(2) // v4：AIDL 由 exec(String[]) 换为 tap/swipe/probe，必须换新进程
+            .tag("macro-injector")
     }
 
     private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            shell = IShellService.Stub.asInterface(service)
+        override fun onServiceConnected(name: ComponentName?, svc: IBinder?) {
+            service = IInjectorService.Stub.asInterface(svc)
+            fastMode = runCatching { service?.probe() == 1 }.getOrNull()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            shell = null
+            service = null
+            fastMode = null
         }
     }
 
@@ -82,13 +90,17 @@ object ShellExecutor {
         val s = runCatching { evaluate() }.getOrDefault(State.NOT_RUNNING)
         if (s != state) {
             state = s
-            if (s != State.READY) shell = null
+            if (s != State.READY) {
+                service = null
+                fastMode = null
+            }
             mainHandler.post { listeners.forEach { runCatching { it(s) } } }
         }
     }
 
     private fun evaluate(): State {
-        val installed = appContext?.packageManager?.getLaunchIntentForPackage(SHIZUKU_PACKAGE) != null
+        val installed = appContext?.packageManager
+            ?.getLaunchIntentForPackage(SHIZUKU_PACKAGE) != null
         if (!Shizuku.pingBinder()) return if (installed) State.NOT_RUNNING else State.NOT_INSTALLED
         if (Shizuku.isPreV11()) return State.UNSUPPORTED
         return if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED)
@@ -119,26 +131,35 @@ object ShellExecutor {
         if (!bound) return
         runCatching { Shizuku.unbindUserService(userServiceArgs, connection, true) }
         bound = false
-        shell = null
+        service = null
+        fastMode = null
     }
 
-    val isBound: Boolean get() = shell != null
+    val isBound: Boolean get() = service != null
 
-    fun tap(x: Int, y: Int): Boolean =
-        exec(arrayOf(INPUT_BIN, "tap", x.toString(), y.toString()))
+    fun tap(x: Int, y: Int): Boolean = call { it.tap(x, y) }
 
     fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int): Boolean =
-        exec(arrayOf(INPUT_BIN, "swipe",
-            x1.toString(), y1.toString(), x2.toString(), y2.toString(), durationMs.toString()))
+        call { it.swipe(x1, y1, x2, y2, durationMs) }
 
-    /** 同步执行一条命令；失败时刷新状态（binder 可能已死）。 */
-    fun exec(cmd: Array<String>): Boolean = try {
-        val s = shell ?: return false
-        s.exec(cmd) == 0
-    } catch (_: Exception) {
-        refresh()
-        false
+    /**
+     * 同步注入调用。Binder 尚未就位时会重绑一次并重试（此场景不可能重复注入）；
+     * 已连接后的任何失败都返回 false 并 refresh（binder 可能已死），由调用方决定停止。
+     */
+    private fun call(block: (IInjectorService) -> Int): Boolean {
+        var s = service
+        if (s == null) {
+            bind()
+            s = service ?: return false
+        }
+        return try {
+            block(s) == 0
+        } catch (_: Exception) {
+            refresh()
+            false
+        }
     }
 
-    private const val INPUT_BIN = "/system/bin/input"
+    const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+    const val REQUEST_CODE = 10001
 }

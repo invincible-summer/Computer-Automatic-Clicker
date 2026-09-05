@@ -9,7 +9,7 @@
 | 端 | 目录 | 技术栈 | 详细设计 |
 | --- | --- | --- | --- |
 | Windows 桌面端 | `src/MacroClicker` | .NET 10 WinForms，纯 Win32（钩子 + SendInput + ADB 子进程），零第三方依赖 | [src/MacroClicker/DESIGN.md](src/MacroClicker/DESIGN.md) |
-| Android 手机端 | `src/MacroClicker.Mobile` | Kotlin + Material 3 底栏四页 UI；**Shizuku（ADB shell）注入，无无障碍依赖** | [src/MacroClicker.Mobile/DESIGN.md](src/MacroClicker.Mobile/DESIGN.md) |
+| Android 手机端 | `src/MacroClicker.Mobile` | Kotlin + Material 3 底栏五页 UI；**Shizuku（ADB shell）注入（快速路径 + input 兜底），无无障碍依赖** | [src/MacroClicker.Mobile/DESIGN.md](src/MacroClicker.Mobile/DESIGN.md) |
 
 两端的宏 JSON 同构互通（`tap` / `swipe`（长按=同点滑动）/ `wait`；桌面端另有 `mouse_click` 等本机类型）。
 
@@ -38,21 +38,21 @@ dotnet publish src/MacroClicker -c Release -r win-x64 --self-contained true ^
 
 ## 关键平台事实（改动前必读）
 
-1. **手机端注入通道 = Shizuku（v3.0 起，无无障碍）**：Android 普通应用向其他应用注入触摸仅有 无障碍 / ADB shell / root 三条路；本应用经 Shizuku UserService（shell uid）执行固定 argv 的 `/system/bin/input tap|swipe`。`newProcess` 已废弃，一律走 UserService（AIDL `destroy() = 16777114`；`UserServiceArgs.processNameSuffix/version/tag`；权限 `checkSelfPermission`/`requestPermission`）。这是唯一允许的注入实现，**不得重新引入 AccessibilityService**。
-2. **Android 无法被动嗅探触摸屏**：`setMotionEventSources` 白名单不含 `SOURCE_TOUCHSCREEN`。手机端「完整录制」采用**全屏标记层捕获 + shell 实时回放**（录制层手势不同达应用，由 `/system/bin/input` 同步注入等效事件，层瞬时 `FLAG_NOT_TOUCHABLE` 放行），不要尝试改成钩子/嗅探方案。
-3. **前台服务**：回放/录制宿主是 `specialUse` 前台服务（`FOREGROUND_SERVICE_SPECIAL_USE` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE`，API 34+ 用 `ServiceCompat.startForeground` 带类型）；只能从前台 UI 拉起（Android 12+ FGS 限制）。
+1. **手机端注入通道 = Shizuku（v3.0 起，无无障碍；v4.0 起双通道）**：Android 普通应用向其他应用注入触摸仅有 无障碍 / ADB shell / root 三条路；本应用经 Shizuku UserService（shell uid）注入，**快速路径** = 反射直调 `InputManager.injectInputEvent`（UserService 进程不受隐藏 API 限制，毫秒级，事件构造对照 AOSP `cmds/input/Input.java`），**兜底** = 固定 argv 的 `/system/bin/input tap|swipe`；首个事件尚未注入即失败才允许回落（防重复注入）。`newProcess` 已废弃，一律走 UserService（AIDL 事务码必须全显式且全有或全无，`destroy() = 16777114`；`UserServiceArgs.processNameSuffix/version/tag`——AIDL 变更必须升 version；权限 `checkSelfPermission`/`requestPermission`）。这是唯一允许的注入实现，**不得重新引入 AccessibilityService**。
+2. **Android 无法被动嗅探触摸屏**：`setMotionEventSources` 白名单不含 `SOURCE_TOUCHSCREEN`。手机端「完整录制」采用**全屏标记层捕获 + 实时回放**（录制层手势不同达应用，由注入引擎同步注入等效事件，层瞬时 `FLAG_NOT_TOUCHABLE` 放行；蒙层 alpha 须远低于 Android 12 不可信触摸 0.8 阈值），不要尝试改成钩子/嗅探方案。
+3. **前台服务**：回放/录制宿主是 `specialUse` 前台服务（`FOREGROUND_SERVICE_SPECIAL_USE` + `PROPERTY_SPECIAL_USE_FGS_SUBTYPE`，API 34+ 用 `ServiceCompat.startForeground` 带类型）；只能从前台 UI 拉起（Android 12+ FGS 限制；Android 15/16 起「可见悬浮窗」是后台 FGS 豁免的判定条件）。
 4. **MuMu 12 官方接口**：`MuMuManager.exe`（安装目录 `shell\`，V4.0.0+），`info -v all` 返回实例 JSON（含 `adb_port`、`main_wnd`、`render_wnd`）。ADB 端口规则 16384 + 32×实例号（占用时 +1）；MuMu 6 为 7555。
 5. **其他模拟器端口**：雷电 5555+2n、夜神 62001（多开 62025+）、逍遥 21503、蓝叠动态端口。桌面端 `EmulatorScanner` 按「MuMu 自带 adb → 模拟器进程目录 → PATH → SDK」顺序发现 adb。
-6. **input 延迟与时限**：单次 `input tap/swipe` 约 300-500ms（两端一致），宏事件间隔建议 ≥0.5s；`input swipe` / 手势时长上限 60s，存储与执行两端都必须钳制。
+6. **注入延迟与时限**：快速路径毫秒级；兼容模式单次 `input tap/swipe` 约 300-500ms（两端一致），此时宏事件间隔建议 ≥0.5s；`input swipe` / 手势时长上限 60s，存储与执行两端都必须钳制。
 
 ## 编码约定
 
 - 桌面端：文件顶职责注释；UI 全部自绘主题控件（`UiTheme`），新增控件需适配深/浅色两套色板；不要引入第三方包。
-- 手机端：字符串全部入 `strings.xml`（中文为默认语言）；布局只用 dp/sp + 权重 + 嵌套滚动（适配小屏）；底栏四页导航（宏/录制/执行/设置）+ Material 动态取色 + 边到边 insets 手动处理；运行时依赖仅允许 `dev.rikka.shizuku:api|provider`（注入通道必需）与既有 androidx/material 库。
+- 手机端：字符串全部入 `strings.xml`（中文为默认语言）；布局只用 dp/sp + 权重 + 嵌套滚动（适配小屏）；底栏五页导航（宏/编辑/录制/执行/设置）+ Material 动态取色 + 边到边 insets 分视图分发（工具栏吃状态栏+挖孔、底栏吃系统栏、内容区吃 ime）；权限请求一律 ActivityResult API；运行时依赖仅允许 `dev.rikka.shizuku:api|provider`（注入通道必需）与既有 androidx/material 库。
 - 两端共同：宏事件模型字段变更必须同步另一端的 JSON 解析（`MacroStore.cs` ↔ `Macro.kt`）并保持向后兼容（未知/缺失字段回退默认值）；注入命令永远使用固定参数数组，不得拼接 shell 字符串。
 - 提交信息用中文，简述「改了什么」；发布产物更新的提交注明产物版本。
 
 ## 安全红线
 
 - 工具仅用于合法自动化场景；手机端**不使用无障碍服务、不读取任何屏幕内容**（v3.0 已彻底移除无障碍服务，不得以任何理由重新引入）；README/应用内保留该声明。
-- 注入命令只允许 `input tap/swipe` 固定 argv；不引入检测规避、驱动级输入、反作弊绕过类功能。
+- 注入只允许两种固定形式：反射 `InputManager.injectInputEvent`（固定 Binder 调用，坐标为 int 数值）或 `/system/bin/input tap|swipe` 固定 argv；永远不得拼接 shell 字符串、不得引入任意命令执行接口；不引入检测规避、驱动级输入、反作弊绕过类功能。

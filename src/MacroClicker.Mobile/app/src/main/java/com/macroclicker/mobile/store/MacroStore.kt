@@ -2,6 +2,7 @@ package com.macroclicker.mobile.store
 
 import android.content.Context
 import android.graphics.Point
+import android.net.Uri
 import android.os.Build
 import android.view.WindowManager
 import com.macroclicker.mobile.model.MacroConfig
@@ -88,6 +89,53 @@ object MacroStore {
         val ok = src.renameTo(dst)
         if (ok && currentName(ctx) == old) setCurrentName(ctx, new)
         return ok
+    }
+
+    /** 宏概要（列表页展示用）：动作数 + 修改时间。 */
+    data class MacroMeta(val name: String, val events: Int, val modified: Long)
+
+    fun listMeta(ctx: Context): List<MacroMeta> =
+        list(ctx).mapNotNull { name ->
+            val f = fileOf(ctx, name)
+            val count = runCatching {
+                MacroConfig.fromJson(JSONObject(f.readText())).events.size
+            }.getOrDefault(0)
+            MacroMeta(name, count, f.lastModified())
+        }
+
+    /**
+     * 导入宏 JSON（SAF）：解析 → 按分辨率换算 → 重名自动加序号 → 保存并设为当前。
+     * 桌面端宏（mouse_click 等）由 MacroEvent.fromJson 兼容映射。
+     */
+    fun importJson(ctx: Context, text: String): MacroConfig? {
+        return try {
+            val cfg = MacroConfig.fromJson(JSONObject(text))
+            var name = cfg.name.trim().ifEmpty { "导入的宏" }
+            var i = 2
+            while (exists(ctx, name)) {
+                name = "${cfg.name.trim().ifEmpty { "导入的宏" }} $i"
+                i++
+            }
+            cfg.name = name
+            val (w, h) = screenSize(ctx)
+            if (cfg.screenW > 0 && cfg.screenH > 0 && (cfg.screenW != w || cfg.screenH != h)) {
+                cfg.rescale(cfg.screenW, cfg.screenH, w, h)
+            }
+            if (!save(ctx, cfg)) return null
+            setCurrentName(ctx, name)
+            cfg
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 导出宏 JSON 到 SAF Uri。 */
+    fun exportTo(ctx: Context, cfg: MacroConfig, uri: Uri): Boolean = try {
+        ctx.contentResolver.openOutputStream(uri)?.use { os ->
+            os.write(cfg.toJson().toString(2).toByteArray(Charsets.UTF_8))
+        } != null
+    } catch (_: Exception) {
+        false
     }
 
     fun currentName(ctx: Context): String =
