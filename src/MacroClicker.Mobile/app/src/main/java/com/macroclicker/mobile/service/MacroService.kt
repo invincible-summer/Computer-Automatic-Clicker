@@ -326,6 +326,7 @@ class MacroService : Service() {
         )
         recorder = r
         r.start()
+        ball?.bringToTop() // 录制层全屏覆盖悬浮球，重新挂载让「点球结束」可点
         ball?.onRecordingChanged(true)
         notifyState()
         return true

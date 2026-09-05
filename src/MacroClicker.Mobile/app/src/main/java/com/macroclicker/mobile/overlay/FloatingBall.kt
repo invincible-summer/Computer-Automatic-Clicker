@@ -74,6 +74,16 @@ class FloatingBall(private val service: MacroService) {
         removeBall()
     }
 
+    /** 录制层全屏且后添加会盖住悬浮球：重新挂载把球带回最上层（主线程 FIFO 保证在层之后执行）。 */
+    fun bringToTop() = handler.post {
+        val b = ball
+        val p = ballParams
+        if (b != null && p != null) runCatching {
+            wm.removeView(b)
+            wm.addView(b, p)
+        }
+    }
+
     // ---------------- 悬浮球 ----------------
 
     @SuppressLint("ClickableViewAccessibility")
