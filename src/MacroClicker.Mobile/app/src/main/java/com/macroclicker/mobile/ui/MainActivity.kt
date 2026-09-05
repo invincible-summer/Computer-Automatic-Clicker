@@ -92,8 +92,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // 边到边：工具栏吃状态栏+挖孔顶，底栏吃系统栏底，内容区吃横屏侧边与输入法
-        WindowCompat.enableEdgeToEdge(window)
+        // 边到边：工具栏吃状态栏+挖孔顶，底栏吃系统栏底，内容区吃横屏侧边与输入法。
+        // Android 15+（targetSdk 35）系统已强制边到边；旧版本主动关掉 decor 内边距。
+        if (Build.VERSION.SDK_INT < 35) WindowCompat.setDecorFitsSystemWindows(window, false)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -289,7 +290,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshMacroList() {
         val items = MacroStore.listMeta(this)
-        macrosAdapter.submitList(items)
+        macrosAdapter.submit(items)
         binding.tvMacrosEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
     }
 
@@ -635,6 +636,8 @@ class MainActivity : AppCompatActivity() {
     // ---------------- 通用 ----------------
 
     private fun toast(res: Int) = Toast.makeText(this, res, Toast.LENGTH_SHORT).show()
+
+    private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
 
     private fun fmtNum(v: Double): String =
         if (v == v.toLong().toDouble()) v.toLong().toString() else v.toString()
